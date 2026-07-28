@@ -73,7 +73,9 @@ async def get_priority_queue(
             AND f.generated_at = (SELECT MAX(generated_at) FROM forecasts WHERE county_id = c.id)
     """
     params = []
-    conditions = []
+    # A priority queue must contain reported conditions, never placeholder
+    # classifications for counties whose bulletin has not been published.
+    conditions = ["b.id IS NOT NULL"]
     
     if phase:
         conditions.append("b.phase = ?")
@@ -129,7 +131,7 @@ async def get_priority_queue(
             county_name=row["county_name"],
             region=row["region"],
             livelihood_zone=row["livelihood_zone"],
-            current_phase=row.get("current_phase") or "Normal",
+            current_phase=row["current_phase"],
             current_vci3m=row.get("current_vci3m"),
             forecast_vci3m=forecast_vci3m,
             crossing_date=row.get("crossing_date"),
@@ -163,7 +165,7 @@ async def get_map_data():
     return [MapCountyData(
         county_id=r["county_id"],
         county_name=r["county_name"],
-        current_phase=r.get("current_phase") or "Normal",
+        current_phase=r.get("current_phase"),
         forecast_phase=r.get("forecast_phase"),
         days_to_crossing=r.get("days_to_crossing"),
         priority_score=r.get("priority_score"),

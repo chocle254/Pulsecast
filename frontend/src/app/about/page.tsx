@@ -42,7 +42,7 @@ export default function AboutPage() {
           NDMA 5-Phase Classification System & VCI3M Thresholds
         </h2>
         <p className="text-sm text-[#5B6560]">
-          Pulsecast maps projections directly onto NDMA's official 5-phase system rather than an invented score:
+          Pulsecast preserves the official county EW phase from each NDMA bulletin. Its VCI3M forecast bands use the bulletin's published vegetation-condition thresholds:
         </p>
 
         <div className="overflow-x-auto">
@@ -51,39 +51,33 @@ export default function AboutPage() {
               <tr className="bg-[#F8F9F5] border-b border-[#C8CCC0] text-[#5B6560]">
                 <th className="py-2.5 px-3">Phase Name</th>
                 <th className="py-2.5 px-3">VCI3M Threshold</th>
-                <th className="py-2.5 px-3">SPI Threshold</th>
                 <th className="py-2.5 px-3">Operational Meaning</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#EDEEE8]">
               <tr>
                 <td className="py-2.5 px-3 font-bold text-[#3B5A37]">Normal</td>
-                <td className="py-2.5 px-3 font-bold">VCI3M ≥ 50</td>
-                <td className="py-2.5 px-3">SPI ≥ -0.5</td>
+                <td className="py-2.5 px-3 font-bold">VCI3M ≥ 35</td>
                 <td className="py-2.5 px-3">Vegetation conditions normal or above average.</td>
               </tr>
               <tr>
                 <td className="py-2.5 px-3 font-bold text-[#7D5D18]">Alert</td>
-                <td className="py-2.5 px-3 font-bold">35 ≤ VCI3M &lt; 50</td>
-                <td className="py-2.5 px-3">-1.0 ≤ SPI &lt; -0.5</td>
+                <td className="py-2.5 px-3 font-bold">20 ≤ VCI3M &lt; 35</td>
                 <td className="py-2.5 px-3">Early moisture deficit; watch stage for preparedness.</td>
               </tr>
               <tr>
                 <td className="py-2.5 px-3 font-bold text-[#7A3E16]">Alarm</td>
-                <td className="py-2.5 px-3 font-bold">20 ≤ VCI3M &lt; 35</td>
-                <td className="py-2.5 px-3">-1.5 ≤ SPI &lt; -1.0</td>
+                <td className="py-2.5 px-3 font-bold">10 ≤ VCI3M &lt; 20</td>
                 <td className="py-2.5 px-3">Moderate to severe vegetation stress; early action needed.</td>
               </tr>
               <tr>
                 <td className="py-2.5 px-3 font-bold text-[#6D221D]">Emergency</td>
-                <td className="py-2.5 px-3 font-bold">VCI3M &lt; 20</td>
-                <td className="py-2.5 px-3">SPI &lt; -1.5</td>
+                <td className="py-2.5 px-3 font-bold">VCI3M &lt; 10</td>
                 <td className="py-2.5 px-3">Extreme drought conditions; emergency response active.</td>
               </tr>
               <tr>
                 <td className="py-2.5 px-3 font-bold text-[#265556]">Recovery</td>
                 <td className="py-2.5 px-3 font-bold">Improving trajectory</td>
-                <td className="py-2.5 px-3">Positive SPI trend</td>
                 <td className="py-2.5 px-3">Conditions returning toward normal baseline.</td>
               </tr>
             </tbody>

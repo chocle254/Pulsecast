@@ -185,7 +185,7 @@ def detect_threshold_crossing(
             base_confidence = max(0.3, 1.0 - (point["week"] * 0.08))
             
             # Adjust confidence based on how far into the threshold the forecast goes
-            threshold = VCI3M_THRESHOLDS.get(current_phase, 50.0)
+            threshold = VCI3M_THRESHOLDS.get(current_phase, VCI3M_THRESHOLDS["Normal"])
             distance_past = threshold - point["vci3m"]
             margin_factor = min(1.0, max(0.5, distance_past / (band_width + 1)))
             

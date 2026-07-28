@@ -24,16 +24,16 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan — initialize DB and seed data on startup."""
+    """Application lifespan — initialize DB and ingest NDMA data on startup."""
     logger.info("Starting Pulsecast API...")
     
     # Initialize database
     await init_db()
     logger.info("Database initialized")
     
-    # Seed with baseline data if empty
+    # Ingest published NDMA county bulletins; no synthetic fallback is used.
     await seed_database()
-    logger.info("Database seeded")
+    logger.info("NDMA bulletin ingestion complete")
     
     yield
     

@@ -20,20 +20,14 @@ logger = logging.getLogger(__name__)
 # NDMA phase classifications
 VALID_PHASES = {"Normal", "Alert", "Alarm", "Emergency", "Recovery"}
 
-# VCI3M thresholds per NDMA classification
+# NDMA's VCI3M vegetation-condition bands, confirmed in current county
+# bulletins. These are a VCI proxy for forecasting; NDMA's official EW phase
+# remains the multi-indicator phase printed in each bulletin.
 VCI3M_THRESHOLDS = {
-    "Normal": 50.0,      # VCI3M >= 50
-    "Alert": 35.0,       # 35 <= VCI3M < 50  (watch)
-    "Alarm": 20.0,       # 20 <= VCI3M < 35  (moderate drought)
-    "Emergency": 10.0,   # VCI3M < 20        (severe drought)
-}
-
-# SPI classification thresholds
-SPI_THRESHOLDS = {
-    "Normal": -0.5,
-    "Alert": -1.0,
-    "Alarm": -1.5,
-    "Emergency": -2.0,
+    "Normal": 35.0,      # normal / above-normal vegetation condition
+    "Alert": 20.0,       # moderate vegetation deficit
+    "Alarm": 10.0,       # severe vegetation deficit
+    "Emergency": 0.0,    # extreme vegetation deficit
 }
 
 # Known county name variations in bulletins
@@ -72,9 +66,12 @@ def extract_phase(text: str) -> Optional[str]:
 def extract_vci3m(text: str) -> Optional[float]:
     """Extract VCI3M value from text."""
     patterns = [
-        r'VCI[\s-]*3M[\s:]*(\d+\.?\d*)',
-        r'VCI3M[\s:]*(\d+\.?\d*)',
-        r'Vegetation\s+Condition\s+Index.*?(\d+\.?\d*)',
+        r'VCI\s*\(\s*3\s*Months?\s*\)[\s:]*(\d+\.?\d*)',
+        r'VCI[\s-]*(?:3\s*Months?|3M)[\s:]*(\d+\.?\d*)',
+        r'3\s*[- ]?month\s+VCI\s+(?:of|was|stood at)\s*(\d+\.?\d*)',
+        r'\bVCI(?!\s*-\s*3\b)\s*[:\-]?\s*(\d+\.?\d*)',
+        r'Vegetation\s+Condition\s+Index[\s:]*(\d+\.?\d*)',
+        r'Vegetation\s+Condition\s+Index\s+(?:averaged|was|stood at)\s*(\d+\.?\d*)',
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -88,8 +85,9 @@ def extract_vci3m(text: str) -> Optional[float]:
 def extract_spi(text: str) -> Optional[float]:
     """Extract SPI value from text."""
     patterns = [
+        r'SPI\s*[-–]?\s*3\s*Months?[\s:]*(-?\d+\.?\d*)',
         r'SPI[\s:]*(-?\d+\.?\d*)',
-        r'Standardized\s+Precipitation.*?(-?\d+\.?\d*)',
+        r'Standardized\s+Precipitation\s+Index[\s:]*(-?\d+\.?\d*)',
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -229,6 +227,83 @@ def parse_bulletin_tables(pdf_path: str) -> list[dict]:
     return records
 
 
+def parse_county_bulletin(
+    pdf_path: str,
+    county_name: str,
+    bulletin_month: str,
+) -> Optional[dict]:
+    """Extract the county summary from one official NDMA county bulletin.
+
+    County bulletins publish the official EW phase and VCI3M in their first
+    page summary, but their table headers vary by county. Parsing the document
+    as a single-county bulletin avoids inventing values when a table layout
+    changes.
+    """
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            # The county summary and indicator table are on page one. Reading
+            # subsequent chart pages can capture unrelated axis labels.
+            page = pdf.pages[0]
+            text = page.extract_text() or ""
+            table_vci3m = _extract_vci3m_from_summary_table(page)
+    except Exception as exc:
+        logger.error("Could not read county bulletin %s: %s", pdf_path, exc)
+        return None
+
+    # Typical extracted text: "County  Alert  Deteriorating". Restrict the
+    # match to the county summary row rather than accepting an incidental
+    # occurrence of a phase name elsewhere in the document.
+    phase_summary = text.split("Drought Situation", maxsplit=1)[0]
+    phase_match = re.search(
+        r"\bC\s*ounty\s*(?:\n|\s)+(Normal|Alert|Alarm|Emergency|Recovery)\b",
+        phase_summary,
+        re.IGNORECASE,
+    )
+    phase = phase_match.group(1).title() if phase_match else None
+    if not phase:
+        # Some county templates use a local county label (for example,
+        # "Kieni") rather than the word County in the final summary row.
+        phases = re.findall(
+            r"\b(Normal|Alert|Alarm|Emergency|Recovery)\b\s+"
+            r"(?:Stable|Worsening|Improving|Deteriorating)\b",
+            phase_summary,
+            re.IGNORECASE,
+        )
+        phase = phases[-1].title() if phases else None
+    if not phase:
+        logger.warning("No official EW phase found in %s; skipping it", pdf_path)
+        return None
+
+    return {
+        "county_name": normalize_county_name(county_name),
+        "month": bulletin_month,
+        "phase": phase,
+        "vci3m": table_vci3m if table_vci3m is not None else extract_vci3m(text),
+        "spi": extract_spi(text),
+        "source_page": 1,
+    }
+
+
+def _extract_vci3m_from_summary_table(page) -> Optional[float]:
+    """Read VCI3M from a first-page NDMA summary table when available."""
+    try:
+        for table in page.extract_tables():
+            for row in table or []:
+                cells = [str(cell).strip().replace("\n", " ") if cell else "" for cell in row]
+                for index, cell in enumerate(cells):
+                    if not re.match(r"^(?:VCI|Vegetation Condition(?: Index)?)\b", cell, re.IGNORECASE):
+                        continue
+                    for value_cell in cells[index + 1:]:
+                        value_match = re.fullmatch(r"(\d+(?:\.\d+)?)%?", value_cell)
+                        if value_match:
+                            value = float(value_match.group(1))
+                            if 0 <= value <= 100:
+                                return value
+    except Exception as exc:
+        logger.debug("Could not extract VCI3M table value: %s", exc)
+    return None
+
+
 def parse_bulletin_text(text: str, page_num: int, bulletin_date: Optional[str] = None) -> list[dict]:
     """
     Fallback: extract county data from unstructured text when tables aren't found.
@@ -261,7 +336,7 @@ def parse_bulletin_text(text: str, page_num: int, bulletin_date: Optional[str] =
 
 
 def classify_from_vci3m(vci3m: float) -> str:
-    """Classify drought phase from VCI3M value using NDMA thresholds."""
+    """Return the NDMA VCI3M vegetation-condition proxy band."""
     if vci3m >= VCI3M_THRESHOLDS["Normal"]:
         return "Normal"
     elif vci3m >= VCI3M_THRESHOLDS["Alert"]:

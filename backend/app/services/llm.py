@@ -2,8 +2,7 @@
 LLM Translation Service
 
 Converts quantitative forecasts into plain-language, cited guidance.
-Uses Groq's free-tier API (OpenAI-compatible) with llama-3.1-70b
-for fast, powerful inference at no cost.
+Uses Groq's OpenAI-compatible API with a currently supported model.
 
 Every generated sentence references the actual indicator values behind it.
 """
@@ -41,7 +40,7 @@ FORMATTING:
 async def call_groq_api(messages: list[dict], max_tokens: int = 500) -> str:
     """
     Call the Groq API (OpenAI-compatible) for LLM inference.
-    Groq offers free-tier access with generous rate limits.
+    Groq offers an OpenAI-compatible chat-completions API.
     Falls back to NVIDIA NIM API if Groq key is unavailable.
     """
     api_key = settings.GROQ_API_KEY

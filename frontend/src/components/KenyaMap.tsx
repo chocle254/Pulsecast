@@ -108,16 +108,16 @@ export default function KenyaMap({ counties, onSelectCounty }: KenyaMapProps) {
           {/* Render County Nodes / Regions */}
           {Object.entries(KENYA_COUNTY_POSITIONS).map(([name, pos]) => {
             const data = countyDataMap.get(name);
-            const phase = data?.current_phase || 'Normal';
-            const color = PHASE_COLORS[phase] || '#7A9B76';
+            const phase = data?.current_phase;
+            const color = phase ? (PHASE_COLORS[phase] || '#7A9B76') : '#AAB2AD';
             const isHovered = hoveredCounty?.county_name === name;
 
             return (
               <g
                 key={name}
                 transform={`translate(${pos.x}, ${pos.y})`}
-                className="cursor-pointer transition-transform duration-150 hover:scale-110"
-                onMouseEnter={() => setHoveredCounty(data || { county_id: 0, county_name: name, current_phase: 'Normal', forecast_phase: null, days_to_crossing: null, priority_score: 0, vci3m: null })}
+                className={data?.current_phase ? 'cursor-pointer transition-transform duration-150 hover:scale-110' : 'cursor-default'}
+                onMouseEnter={() => setHoveredCounty(data?.current_phase ? data : null)}
                 onMouseLeave={() => setHoveredCounty(null)}
                 onClick={() => data && onSelectCounty && onSelectCounty(data.county_id)}
               >
@@ -154,7 +154,7 @@ export default function KenyaMap({ counties, onSelectCounty }: KenyaMapProps) {
         </svg>
 
         {/* Hover Tooltip Overlay */}
-        {hoveredCounty && (
+        {hoveredCounty?.current_phase && (
           <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-xs p-3 rounded-md shadow-lg border border-gray-300 w-56 pointer-events-none z-10 transition-opacity duration-150">
             <div className="flex items-center justify-between mb-1.5">
               <span className="font-bold text-sm text-gray-900">{hoveredCounty.county_name}</span>

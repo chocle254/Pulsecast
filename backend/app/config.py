@@ -25,10 +25,12 @@ class Settings(BaseSettings):
     NDMA_BASE_URL: str = "https://knowledgeweb.ndma.go.ke"
     NDMA_BULLETIN_PATH: str = "/api/drought-bulletins"
 
-    # LLM — Groq (free tier, fast) or NVIDIA NIM as fallback
+    # LLM — Groq or NVIDIA NIM as fallback
     GROQ_API_KEY: str = ""
     NVIDIA_API_KEY: str = ""
-    LLM_MODEL: str = "llama-3.1-70b-versatile"
+    # `llama-3.1-70b-versatile` was retired by Groq. This is Groq's
+    # documented replacement for the subsequently retiring Llama 3.3 model.
+    LLM_MODEL: str = "openai/gpt-oss-120b"
 
     # CORS
     ALLOWED_ORIGINS: list[str] = [

@@ -113,7 +113,7 @@ class BacktestSummary(BaseModel):
 class MapCountyData(BaseModel):
     county_id: int
     county_name: str
-    current_phase: str
+    current_phase: Optional[str] = None
     forecast_phase: Optional[str] = None
     days_to_crossing: Optional[int] = None
     priority_score: Optional[float] = None

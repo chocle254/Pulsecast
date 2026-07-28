@@ -97,10 +97,10 @@ export default function ThresholdChart({
 
     // NDMA Thresholds
     const thresholds = [
-      { name: 'Normal', value: 50, color: '#7A9B76' },
-      { name: 'Alert', value: 35, color: '#C9A24B' },
-      { name: 'Alarm', value: 20, color: '#B9713A' },
-      { name: 'Emergency', value: 10, color: '#9B3B34' },
+      { name: 'Normal', value: 35, color: '#7A9B76' },
+      { name: 'Alert', value: 20, color: '#C9A24B' },
+      { name: 'Alarm', value: 10, color: '#B9713A' },
+      { name: 'Emergency', value: 0, color: '#9B3B34' },
     ];
 
     thresholds.forEach((t) => {
