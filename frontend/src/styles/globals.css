@@ -1,0 +1,269 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+:root {
+  /* Field Paper Palette */
+  --bg-app: #EDEEE8;
+  --bg-surface: #F6F6F2;
+  --bg-card: #FFFFFF;
+  --bg-elevated: #F8F9F5;
+  --ink: #232A2E;
+  --ink-muted: #5B6560;
+  --ink-light: #8A948E;
+  --border-subtle: #DDE0D8;
+  --border-medium: #C8CCC0;
+  --border-strong: #A3A89A;
+
+  /* NDMA 5-Phase Ramp */
+  --phase-normal: #7A9B76;
+  --phase-normal-bg: #EAF2E8;
+  --phase-normal-border: #A2C49E;
+  
+  --phase-alert: #C9A24B;
+  --phase-alert-bg: #FDF7E7;
+  --phase-alert-border: #E0BE6C;
+
+  --phase-alarm: #B9713A;
+  --phase-alarm-bg: #FBF0E6;
+  --phase-alarm-border: #D89562;
+
+  --phase-emergency: #9B3B34;
+  --phase-emergency-bg: #FAECEB;
+  --phase-emergency-border: #C46760;
+
+  --phase-recovery: #4A8B8C;
+  --phase-recovery-bg: #E8F4F4;
+  --phase-recovery-border: #74AFB0;
+
+  /* Typography Fonts */
+  --font-display: 'Space Grotesk', -apple-system, sans-serif;
+  --font-body: 'IBM Plex Sans', -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+
+  /* Shadow & Radii */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-subtle: 0 1px 3px rgba(35, 42, 46, 0.05), 0 1px 2px rgba(35, 42, 46, 0.03);
+  --shadow-card: 0 4px 12px rgba(35, 42, 46, 0.06), 0 1px 3px rgba(35, 42, 46, 0.04);
+
+  /* Animation */
+  --transition-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-normal: 250ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  background-color: var(--bg-app);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+
+/* Monospace numeric values */
+.tabular-nums, .data-num, .num, td, th {
+  font-variant-numeric: tabular-nums;
+}
+.mono-val {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Layout Container */
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* Header & Nav */
+.header-nav {
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-medium);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: var(--shadow-subtle);
+}
+
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+}
+
+.brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.brand-icon {
+  width: 32px;
+  height: 32px;
+  background: var(--ink);
+  color: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.brand-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.brand-subtitle {
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  background: var(--border-subtle);
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  list-style: none;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--ink-muted);
+  font-weight: 500;
+  font-size: 0.9rem;
+  transition: all var(--transition-fast);
+}
+
+.nav-link:hover {
+  color: var(--ink);
+  background: var(--border-subtle);
+}
+
+.nav-link.active {
+  color: var(--ink);
+  background: var(--bg-card);
+  border: 1px solid var(--border-medium);
+  font-weight: 600;
+  box-shadow: var(--shadow-subtle);
+}
+
+/* Phase Badges */
+.phase-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.65rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
+}
+
+.phase-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.phase-badge.phase-normal {
+  background: var(--phase-normal-bg);
+  color: #3B5A37;
+  border-color: var(--phase-normal-border);
+}
+.phase-badge.phase-normal .phase-dot { background: var(--phase-normal); }
+
+.phase-badge.phase-alert {
+  background: var(--phase-alert-bg);
+  color: #7D5D18;
+  border-color: var(--phase-alert-border);
+}
+.phase-badge.phase-alert .phase-dot { background: var(--phase-alert); }
+
+.phase-badge.phase-alarm {
+  background: var(--phase-alarm-bg);
+  color: #7A3E16;
+  border-color: var(--phase-alarm-border);
+}
+.phase-badge.phase-alarm .phase-dot { background: var(--phase-alarm); }
+
+.phase-badge.phase-emergency {
+  background: var(--phase-emergency-bg);
+  color: #6D221D;
+  border-color: var(--phase-emergency-border);
+}
+.phase-badge.phase-emergency .phase-dot { background: var(--phase-emergency); }
+
+.phase-badge.phase-recovery {
+  background: var(--phase-recovery-bg);
+  color: #265556;
+  border-color: var(--phase-recovery-border);
+}
+.phase-badge.phase-recovery .phase-dot { background: var(--phase-recovery); }
+
+/* Standard Card */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 1.25rem;
+}
+
+/* Subtle Urgency Pulse for Top 3 Queue Rows */
+@keyframes subtle-pulse {
+  0%, 100% { border-color: var(--border-strong); }
+  50% { border-color: var(--phase-alarm); }
+}
+
+.top-urgency-row {
+  border-left: 4px solid var(--phase-emergency) !important;
+  animation: subtle-pulse 3s infinite ease-in-out;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
