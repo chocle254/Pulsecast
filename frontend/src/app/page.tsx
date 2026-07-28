@@ -7,6 +7,14 @@ import PhaseBadge from '@/components/PhaseBadge';
 import Sparkline from '@/components/Sparkline';
 import { fetchPriorityQueue, fetchRegions, fetchLivelihoodZones, PriorityItem } from '@/lib/api';
 
+const PHASE_BORDER_COLORS: Record<string, string> = {
+  Normal: '#7A9B76',
+  Alert: '#C9A24B',
+  Alarm: '#B9713A',
+  Emergency: '#9B3B34',
+  Recovery: '#4A8B8C',
+};
+
 export default function PriorityQueuePage() {
   const [items, setItems] = useState<PriorityItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,22 +89,22 @@ export default function PriorityQueuePage() {
 
         <div className="flex items-center gap-4 bg-white px-4 py-3 rounded-md border border-[#DDE0D8] font-mono text-xs">
           <div className="text-center px-2">
-            <div className="text-lg font-bold text-[#232A2E]">{items.length}</div>
+            <div key={`count-${items.length}`} className="text-lg font-bold text-[#232A2E] animate-count">{items.length}</div>
             <div className="text-[11px] text-[#5B6560]">Counties</div>
           </div>
           <div className="h-8 w-px bg-[#DDE0D8]" />
           <div className="text-center px-2">
-            <div className="text-lg font-bold text-[#C9A24B]">{alertCount}</div>
+            <div key={`alert-${alertCount}`} className="text-lg font-bold text-[#C9A24B] animate-count">{alertCount}</div>
             <div className="text-[11px] text-[#5B6560]">Alert</div>
           </div>
           <div className="h-8 w-px bg-[#DDE0D8]" />
           <div className="text-center px-2">
-            <div className="text-lg font-bold text-[#B9713A]">{alarmCount}</div>
+            <div key={`alarm-${alarmCount}`} className="text-lg font-bold text-[#B9713A] animate-count">{alarmCount}</div>
             <div className="text-[11px] text-[#5B6560]">Alarm/Emerg</div>
           </div>
           <div className="h-8 w-px bg-[#DDE0D8]" />
           <div className="text-center px-2">
-            <div className="text-lg font-bold text-[#9B3B34]">{imminentCrossingCount}</div>
+            <div key={`crossing-${imminentCrossingCount}`} className="text-lg font-bold text-[#9B3B34] animate-count">{imminentCrossingCount}</div>
             <div className="text-[11px] text-[#5B6560]">&lt; 3w Crossing</div>
           </div>
         </div>
@@ -180,9 +188,18 @@ export default function PriorityQueuePage() {
 
       {/* Main Ranked Priority Queue List */}
       {loading ? (
-        <div className="card p-12 text-center text-[#5B6560] font-mono">
-          <Activity className="w-6 h-6 animate-spin mx-auto mb-2 text-[#232A2E]" />
-          Computing forecasts & priority queue rankings...
+        <div className="space-y-3">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="card p-4 bg-white border border-[#C8CCC0] flex items-center gap-4">
+              <div className="skeleton w-9 h-9 rounded shrink-0" />
+              <div className="flex-1 space-y-2">
+                <div className="skeleton h-4 w-40 rounded" />
+                <div className="skeleton h-3 w-56 rounded" />
+              </div>
+              <div className="skeleton h-8 w-28 rounded shrink-0" />
+              <div className="skeleton h-8 w-20 rounded shrink-0" />
+            </div>
+          ))}
         </div>
       ) : error ? (
         <div className="card p-8 bg-red-50 border-red-200 text-red-800 font-mono text-sm">
@@ -200,9 +217,13 @@ export default function PriorityQueuePage() {
             return (
               <div
                 key={item.county_id}
-                className={`card hover:shadow-md transition-all duration-200 p-4 bg-white border border-[#C8CCC0] ${
+                className={`card card-hover animate-row-enter p-4 bg-white border border-[#C8CCC0] ${
                   isTopUrgent ? 'top-urgency-row' : ''
                 }`}
+                style={{
+                  animationDelay: `${index * 40}ms`,
+                  borderLeft: isTopUrgent ? undefined : `4px solid ${PHASE_BORDER_COLORS[item.current_phase] || '#7A9B76'}`,
+                }}
               >
                 <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
                   {/* Left: Rank, County Name, Metadata, Phase */}
@@ -262,7 +283,7 @@ export default function PriorityQueuePage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="text-xs font-mono text-[#5B6560]">
+                        <div className="inline-flex items-center gap-1 text-xs font-mono font-semibold text-[#3B5A37] bg-[#EAF2E8] px-2 py-0.5 rounded border border-[#A2C49E]">
                           No crossing projected
                         </div>
                       )}
