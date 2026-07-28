@@ -1,8 +1,14 @@
 """
-NDMA Bulletin Ingestion Service
+NDMA Bulletin Ingestion Service — REAL DATA
 
-Fetches monthly drought bulletins from NDMA's KnowledgeWeb portal,
-downloads the PDFs, and stores them locally for parsing.
+Fetches actual monthly drought bulletins from NDMA's website.
+NDMA publishes per-county drought early warning bulletins as PDFs at:
+  https://www.ndma.go.ke/index.php/resource-center/category/12-drought-updates
+
+This service:
+1. Scrapes the NDMA resource center for available PDF bulletin links
+2. Downloads each PDF to a local cache directory
+3. Passes them to the parser for structured data extraction
 """
 
 import httpx
@@ -11,24 +17,15 @@ import re
 import logging
 from datetime import datetime
 from typing import Optional
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-# NDMA KnowledgeWeb bulletin URLs follow this pattern
-NDMA_KNOWLEDGE_WEB = "https://knowledgeweb.ndma.go.ke"
-NDMA_BULLETINS_API = f"{NDMA_KNOWLEDGE_WEB}/api/drought-bulletins"
+# NDMA official website
 NDMA_MAIN_SITE = "https://www.ndma.go.ke"
-NDMA_RESOURCE_CENTER = f"{NDMA_MAIN_SITE}/index.php/resource-center/send"
+NDMA_RESOURCE_CENTER = f"{NDMA_MAIN_SITE}/index.php/resource-center/category/12-drought-updates"
 
-# Known ASAL (Arid and Semi-Arid Lands) counties with drought monitoring
-ASAL_COUNTIES = [
-    "Baringo", "Garissa", "Isiolo", "Kajiado", "Kilifi", "Kitui",
-    "Kwale", "Laikipia", "Lamu", "Makueni", "Mandera", "Marsabit",
-    "Meru", "Narok", "Nyeri", "Samburu", "Taita Taveta", "Tana River",
-    "Tharaka Nithi", "Turkana", "Wajir", "West Pokot", "Embu",
-]
-
-# All 47 Kenya counties for the map view
+# All 47 Kenya counties with metadata
 ALL_COUNTIES = [
     {"name": "Baringo", "region": "Rift Valley", "livelihood": "agro-pastoralist", "lat": 0.4917, "lon": 35.9585},
     {"name": "Bomet", "region": "Rift Valley", "livelihood": "mixed", "lat": -0.7813, "lon": 35.3416},
@@ -80,142 +77,138 @@ ALL_COUNTIES = [
 ]
 
 
-async def fetch_bulletin_list(year: Optional[int] = None, month: Optional[int] = None) -> list[dict]:
+async def fetch_bulletin_links() -> list[dict]:
     """
-    Fetch the list of available NDMA drought bulletins.
-    
-    Attempts to scrape the NDMA KnowledgeWeb portal for available PDFs.
-    Falls back to constructing known URL patterns if the API is unavailable.
+    Scrape the NDMA resource center page for all available drought bulletin PDFs.
+    Returns a list of {url, filename, year, month}.
     """
     bulletins = []
-    
+
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            # Try the KnowledgeWeb API first
             response = await client.get(
-                f"{NDMA_MAIN_SITE}/index.php/resource-center/category/12-drought-updates",
+                NDMA_RESOURCE_CENTER,
                 headers={"User-Agent": "Pulsecast/1.0 (drought-monitoring-research)"}
             )
-            
-            if response.status_code == 200:
-                # Parse the page for PDF links
-                content = response.text
+
+            if response.status_code != 200:
+                logger.warning(f"NDMA resource center returned {response.status_code}")
+                return bulletins
+
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            # NDMA uses Joomla — bulletin PDFs are typically in download links
+            for link in soup.find_all("a", href=True):
+                href = link["href"]
+
                 # Look for PDF download links
-                pdf_pattern = r'href="([^"]*\.pdf[^"]*)"'
-                matches = re.findall(pdf_pattern, content, re.IGNORECASE)
-                
-                for url in matches:
-                    if not url.startswith("http"):
-                        url = f"{NDMA_MAIN_SITE}{url}"
-                    
-                    # Try to extract date from URL or filename
-                    date_match = re.search(r'(\d{4})[-_]?(\d{2})', url)
-                    if date_match:
-                        b_year = int(date_match.group(1))
-                        b_month = int(date_match.group(2))
-                        
-                        if year and b_year != year:
-                            continue
-                        if month and b_month != month:
-                            continue
-                        
-                        bulletins.append({
-                            "url": url,
-                            "year": b_year,
-                            "month": b_month,
-                            "filename": url.split("/")[-1]
-                        })
-                    
-                logger.info(f"Found {len(bulletins)} bulletins from NDMA website")
-            else:
-                logger.warning(f"NDMA website returned status {response.status_code}")
-                
+                if "/send/" in href or href.lower().endswith(".pdf"):
+                    url = href if href.startswith("http") else f"{NDMA_MAIN_SITE}{href}"
+
+                    # Extract date from link text or URL
+                    text = link.get_text(strip=True).lower()
+                    full = f"{text} {url}".lower()
+
+                    # Try to extract year-month
+                    month_names = {
+                        "january": 1, "february": 2, "march": 3, "april": 4,
+                        "may": 5, "june": 6, "july": 7, "august": 8,
+                        "september": 9, "october": 10, "november": 11, "december": 12
+                    }
+
+                    year = None
+                    month = None
+
+                    # Match "Month YYYY" or "YYYY Month"
+                    for mname, mnum in month_names.items():
+                        if mname in full:
+                            month = mnum
+                            break
+
+                    year_match = re.search(r'20[12]\d', full)
+                    if year_match:
+                        year = int(year_match.group())
+
+                    if not year:
+                        year = datetime.now().year
+
+                    filename = url.split("/")[-1]
+                    if not filename.endswith(".pdf"):
+                        filename = f"bulletin_{year}_{month or 0:02d}.pdf"
+
+                    bulletins.append({
+                        "url": url,
+                        "filename": filename,
+                        "year": year,
+                        "month": month,
+                        "title": link.get_text(strip=True),
+                    })
+
+            logger.info(f"Found {len(bulletins)} bulletin links from NDMA resource center")
+
     except httpx.HTTPError as e:
         logger.warning(f"Could not reach NDMA website: {e}")
     except Exception as e:
-        logger.error(f"Error fetching bulletin list: {e}")
-    
-    # If no bulletins found, try known URL patterns for recent months
-    if not bulletins:
-        logger.info("Falling back to constructed bulletin URLs")
-        target_year = year or datetime.now().year
-        months_to_try = [month] if month else list(range(1, 13))
-        
-        for m in months_to_try:
-            # Common NDMA URL patterns
-            month_name = datetime(target_year, m, 1).strftime("%B").lower()
-            patterns = [
-                f"{NDMA_MAIN_SITE}/index.php/resource-center/send/12-drought-updates/{target_year}-{m:02d}-drought-bulletin",
-                f"{NDMA_KNOWLEDGE_WEB}/drought-bulletins/{target_year}/{month_name}",
-            ]
-            
-            for url in patterns:
-                bulletins.append({
-                    "url": url,
-                    "year": target_year,
-                    "month": m,
-                    "filename": f"drought_bulletin_{target_year}_{m:02d}.pdf"
-                })
-    
+        logger.error(f"Error scraping NDMA resource center: {e}")
+
     return bulletins
 
 
 async def download_bulletin(url: str, save_dir: str = "data/bulletins") -> Optional[str]:
     """
     Download a single NDMA bulletin PDF.
-    
     Returns the local file path if successful, None otherwise.
     """
     os.makedirs(save_dir, exist_ok=True)
-    filename = url.split("/")[-1]
+    filename = url.split("/")[-1].split("?")[0]
     if not filename.endswith(".pdf"):
         filename += ".pdf"
-    
+
     filepath = os.path.join(save_dir, filename)
-    
+
     # Skip if already downloaded
-    if os.path.exists(filepath):
-        logger.info(f"Bulletin already downloaded: {filepath}")
+    if os.path.exists(filepath) and os.path.getsize(filepath) > 1000:
+        logger.info(f"Bulletin already cached: {filepath}")
         return filepath
-    
+
     try:
         async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
             response = await client.get(
                 url,
                 headers={"User-Agent": "Pulsecast/1.0 (drought-monitoring-research)"}
             )
-            
+
             if response.status_code == 200:
                 content_type = response.headers.get("content-type", "")
                 if "pdf" in content_type or response.content[:4] == b"%PDF":
                     with open(filepath, "wb") as f:
                         f.write(response.content)
-                    logger.info(f"Downloaded bulletin: {filepath}")
+                    logger.info(f"Downloaded bulletin: {filepath} ({len(response.content)} bytes)")
                     return filepath
                 else:
-                    logger.warning(f"URL did not return a PDF: {url}")
+                    logger.warning(f"URL did not return a PDF: {url} (content-type: {content_type})")
             else:
                 logger.warning(f"Download failed with status {response.status_code}: {url}")
-                
+
     except httpx.HTTPError as e:
         logger.warning(f"Download error for {url}: {e}")
     except Exception as e:
         logger.error(f"Unexpected error downloading {url}: {e}")
-    
+
     return None
 
 
-async def ingest_bulletins(year: Optional[int] = None, month: Optional[int] = None) -> list[str]:
+async def ingest_all_bulletins(save_dir: str = "data/bulletins") -> list[str]:
     """
-    Full ingestion pipeline: fetch list → download PDFs → return local paths.
+    Full ingestion pipeline: scrape NDMA → download PDFs → return local paths.
     """
-    bulletins = await fetch_bulletin_list(year, month)
+    links = await fetch_bulletin_links()
     downloaded = []
-    
-    for bulletin in bulletins:
-        path = await download_bulletin(bulletin["url"])
+
+    for bulletin in links:
+        path = await download_bulletin(bulletin["url"], save_dir)
         if path:
             downloaded.append(path)
-    
-    logger.info(f"Ingested {len(downloaded)} bulletins")
+
+    logger.info(f"Ingested {len(downloaded)} bulletins out of {len(links)} links found")
     return downloaded

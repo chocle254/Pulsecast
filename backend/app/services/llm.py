@@ -1,30 +1,22 @@
 """
 LLM Translation Service
 
-Converts quantitative forecasts into plain-language, cited guidance
-using OpenAI's API. Every generated sentence references the actual
-indicator values behind it.
+Converts quantitative forecasts into plain-language, cited guidance.
+Uses Groq's free-tier API (OpenAI-compatible) with llama-3.1-70b
+for fast, powerful inference at no cost.
+
+Every generated sentence references the actual indicator values behind it.
 """
 
 import json
+import re
 import logging
 from datetime import datetime
 from typing import Optional
-from openai import AsyncOpenAI
+import httpx
 from app.config import settings
 
 logger = logging.getLogger(__name__)
-
-# Initialize OpenAI client
-client = None
-
-
-def get_openai_client() -> AsyncOpenAI:
-    """Get or create OpenAI client."""
-    global client
-    if client is None:
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-    return client
 
 
 SYSTEM_PROMPT = """You are a drought early-warning analyst for Kenya's National Drought Management Authority (NDMA). Your role is to translate quantitative drought forecasts into clear, actionable guidance for county drought coordinators.
@@ -46,6 +38,45 @@ FORMATTING:
 - Use [ref:confidence=XX%] for confidence citations"""
 
 
+async def call_groq_api(messages: list[dict], max_tokens: int = 500) -> str:
+    """
+    Call the Groq API (OpenAI-compatible) for LLM inference.
+    Groq offers free-tier access with generous rate limits.
+    Falls back to NVIDIA NIM API if Groq key is unavailable.
+    """
+    api_key = settings.GROQ_API_KEY
+    base_url = "https://api.groq.com/openai/v1/chat/completions"
+    model = settings.LLM_MODEL
+
+    # Try NVIDIA NIM as fallback
+    if not api_key and settings.NVIDIA_API_KEY:
+        api_key = settings.NVIDIA_API_KEY
+        base_url = "https://integrate.api.nvidia.com/v1/chat/completions"
+        model = "meta/llama-3.1-70b-instruct"
+
+    if not api_key:
+        raise ValueError("No LLM API key configured (set GROQ_API_KEY or NVIDIA_API_KEY)")
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.3,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(base_url, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+
+
 async def generate_explanation(
     county_name: str,
     current_phase: str,
@@ -62,14 +93,13 @@ async def generate_explanation(
 ) -> dict:
     """
     Generate a plain-language explanation of a county's forecast.
-    
+
     Args:
         detail_level: "summary" (1-2 sentences for queue) or "full" (detailed for county page)
-        
+
     Returns:
         {explanation, citations, generated_at}
     """
-    # Build context for the LLM
     context = {
         "county": county_name,
         "current_phase": current_phase,
@@ -85,7 +115,7 @@ async def generate_explanation(
         "priority_score": priority_score,
         "historical_trend": historical_trend,
     }
-    
+
     if detail_level == "summary":
         user_prompt = f"""Generate a ONE-SENTENCE summary for the priority queue for {county_name} county.
 
@@ -103,23 +133,19 @@ Structure:
 3. Recommended action — what a coordinator should consider given this forecast
 
 Include [ref:] citations for every specific value mentioned."""
-    
+
     try:
-        openai_client = get_openai_client()
-        response = await openai_client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.3,
-            max_tokens=500 if detail_level == "summary" else 1000,
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        explanation = await call_groq_api(
+            messages,
+            max_tokens=500 if detail_level == "summary" else 1000
         )
-        
-        explanation = response.choices[0].message.content
-        
+
         # Extract citations from the explanation
-        import re
         citation_pattern = r'\[ref:(\w+)=([^\]]+)\]'
         citations = []
         for match in re.finditer(citation_pattern, explanation):
@@ -128,17 +154,17 @@ Include [ref:] citations for every specific value mentioned."""
                 "value": match.group(2),
                 "position": match.start()
             })
-        
+
         return {
             "explanation": explanation,
             "citations": citations,
             "generated_at": datetime.now().isoformat(),
-            "model": settings.OPENAI_MODEL,
+            "model": settings.LLM_MODEL,
         }
-        
+
     except Exception as e:
         logger.error(f"LLM explanation generation failed for {county_name}: {e}")
-        
+
         # Fallback to template-based explanation
         return generate_fallback_explanation(
             county_name, current_phase, current_vci3m, current_spi,
@@ -165,16 +191,15 @@ def generate_fallback_explanation(
     """
     citations = []
     parts = []
-    
-    # Current status
+
     vci_str = f"[ref:VCI3M={current_vci3m}]" if current_vci3m else ""
     spi_str = f"[ref:SPI={current_spi}]" if current_spi else ""
-    
+
     if current_vci3m:
         citations.append({"field": "VCI3M", "value": str(current_vci3m)})
     if current_spi:
         citations.append({"field": "SPI", "value": str(current_spi)})
-    
+
     if detail_level == "summary":
         if crossing_date and days_to_crossing:
             conf_pct = f"{confidence*100:.0f}" if confidence else "N/A"
@@ -198,7 +223,6 @@ def generate_fallback_explanation(
             )
             citations.append({"field": "phase", "value": current_phase})
     else:
-        # Full explanation
         parts.append(
             f"**Current Situation:** {county_name} county is currently classified "
             f"in the [ref:phase={current_phase}] phase of NDMA's drought classification system. "
@@ -207,7 +231,7 @@ def generate_fallback_explanation(
             + "."
         )
         citations.append({"field": "phase", "value": current_phase})
-        
+
         if crossing_date and days_to_crossing:
             conf_pct = f"{confidence*100:.0f}" if confidence else "N/A"
             parts.append(
@@ -223,7 +247,7 @@ def generate_fallback_explanation(
                 {"field": "crossing", "value": crossing_date},
                 {"field": "confidence", "value": f"{conf_pct}%"},
             ])
-            
+
             parts.append(
                 f"\n\n**Recommended Action:** Given the projected transition to "
                 f"{crossing_phase} within {days_to_crossing} days, consider activating "
@@ -241,7 +265,7 @@ def generate_fallback_explanation(
                 f"\n\n**Recommended Action:** Continue routine monitoring. No immediate "
                 f"escalation appears necessary based on current projections."
             )
-    
+
     return {
         "explanation": "".join(parts),
         "citations": citations,
@@ -253,11 +277,9 @@ def generate_fallback_explanation(
 async def generate_batch_summaries(counties_data: list[dict]) -> dict[int, str]:
     """
     Generate summary explanations for multiple counties (for the priority queue).
-    
-    More efficient than calling generate_explanation one at a time.
     """
     summaries = {}
-    
+
     for county in counties_data:
         try:
             result = await generate_explanation(
@@ -277,5 +299,5 @@ async def generate_batch_summaries(counties_data: list[dict]) -> dict[int, str]:
         except Exception as e:
             logger.error(f"Failed to generate summary for county {county.get('county_name')}: {e}")
             summaries[county["county_id"]] = f"{county.get('county_name', 'Unknown')} — forecast unavailable."
-    
+
     return summaries

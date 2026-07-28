@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 
 :root {
@@ -17,7 +21,7 @@
   --phase-normal: #7A9B76;
   --phase-normal-bg: #EAF2E8;
   --phase-normal-border: #A2C49E;
-  
+
   --phase-alert: #C9A24B;
   --phase-alert-bg: #FDF7E7;
   --phase-alert-border: #E0BE6C;
@@ -51,29 +55,30 @@
   --transition-normal: 250ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 
-html, body {
-  background-color: var(--bg-app);
-  color: var(--ink);
-  font-family: var(--font-body);
-  font-size: 15px;
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  min-height: 100vh;
-}
+  html, body {
+    background-color: var(--bg-app);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+  }
 
-/* Headings */
-h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-display);
-  font-weight: 700;
-  color: var(--ink);
-  letter-spacing: -0.02em;
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+  }
 }
 
 /* Monospace numeric values */
@@ -247,6 +252,8 @@ h1, h2, h3, h4, h5, h6 {
   padding: 1.25rem;
 }
 
+/* === MOTION DESIGN SYSTEM === */
+
 /* Subtle Urgency Pulse for Top 3 Queue Rows */
 @keyframes subtle-pulse {
   0%, 100% { border-color: var(--border-strong); }
@@ -256,6 +263,99 @@ h1, h2, h3, h4, h5, h6 {
 .top-urgency-row {
   border-left: 4px solid var(--phase-emergency) !important;
   animation: subtle-pulse 3s infinite ease-in-out;
+}
+
+/* Row Entrance — staggered fade+slide for priority queue items */
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-row-enter {
+  animation: fadeSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Page Transition Fade — fast 200ms as spec requires */
+@keyframes pageFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-page-enter {
+  animation: pageFadeIn 200ms ease-out both;
+}
+
+/* Number Count/Tween — visual scale bump on data load */
+@keyframes countTween {
+  0% {
+    opacity: 0;
+    transform: scale(0.85) translateY(4px);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.03) translateY(-1px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-count {
+  animation: countTween 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Card Hover Lift */
+.card-hover {
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(35, 42, 46, 0.1), 0 2px 6px rgba(35, 42, 46, 0.06);
+}
+
+/* Threshold Line Draw — SVG stroke animation */
+@keyframes drawLine {
+  from { stroke-dashoffset: var(--line-length, 1000); }
+  to { stroke-dashoffset: 0; }
+}
+
+.animate-draw-line {
+  animation: drawLine 0.8s cubic-bezier(0.33, 1, 0.68, 1) both;
+}
+
+/* AI Typing Effect — border pulse on first-load AI text */
+@keyframes typingCursor {
+  0%, 100% { border-right-color: var(--ink); }
+  50% { border-right-color: transparent; }
+}
+
+.typing-effect {
+  border-right: 2px solid var(--ink);
+  animation: typingCursor 0.8s steps(1) infinite;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Skeleton Loading Shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #EDEEE8 25%, #DDE0D8 50%, #EDEEE8 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-sm);
 }
 
 /* Reduced Motion */

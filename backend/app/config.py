@@ -11,17 +11,24 @@ class Settings(BaseSettings):
     APP_NAME: str = "Pulsecast API"
     DEBUG: bool = False
 
-    # Database
-    DATABASE_URL: str = "sqlite+aiosqlite:///./pulsecast.db"
-    DB_PATH: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pulsecast.db")
+    # Database — Railway volume mount path, falls back to local
+    # On Railway: set RAILWAY_VOLUME_MOUNT_PATH=/data in your service settings
+    DB_PATH: str = os.environ.get(
+        "DB_PATH",
+        os.path.join(
+            os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", os.path.dirname(os.path.dirname(__file__))),
+            "pulsecast.db"
+        )
+    )
 
     # NDMA
     NDMA_BASE_URL: str = "https://knowledgeweb.ndma.go.ke"
     NDMA_BULLETIN_PATH: str = "/api/drought-bulletins"
 
-    # OpenAI
-    OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    # LLM — Groq (free tier, fast) or NVIDIA NIM as fallback
+    GROQ_API_KEY: str = ""
+    NVIDIA_API_KEY: str = ""
+    LLM_MODEL: str = "llama-3.1-70b-versatile"
 
     # CORS
     ALLOWED_ORIGINS: list[str] = [
