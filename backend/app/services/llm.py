@@ -40,6 +40,27 @@ FORMATTING:
 - Use [ref:seasonal_outlook=<period, e.g. Aug-Oct2026>] when citing the ICPAC seasonal outlook — cite the period only, describe its content in your own words in the prose"""
 
 
+BACKTEST_SYSTEM_PROMPT = """You are a drought-forecasting model auditor reviewing Pulsecast's AR(2) backtest results against official NDMA bulletin classifications. Your job is pattern analysis across counties and months, not per-county advice.
+
+CRITICAL RULES:
+1. Every claim must cite the specific data value it's based on, using [ref:field_name=value] format
+2. Identify patterns: which counties the model misses most, whether false alarms cluster in a livelihood zone, region, or phase transition type
+3. Be honest about small sample sizes — if total_predictions is low, say the pattern is tentative, not conclusive
+4. Never inflate the model's performance — if hit rate is mediocre or the sample is thin, say so plainly
+5. Keep it to 2-3 short paragraphs
+6. This is diagnostic writing for the model's own credibility page — treat it like a methods-section audit, not marketing copy"""
+
+
+REGIONAL_SYSTEM_PROMPT = """You are a regional drought-risk analyst reviewing Pulsecast's current priority queue across all monitored counties. Your job is to spot clustering — counties in the same region or livelihood zone trending toward the same phase at once — which a per-county view can't surface on its own.
+
+CRITICAL RULES:
+1. Cite every county/phase claim using [ref:CountyName=Phase] format
+2. Only report clusters that are actually present in the data — do not infer regional causes not stated in the input
+3. If fewer than 3 counties currently show elevated phases (Alert/Alarm/Emergency), say clustering can't be assessed yet rather than forcing a pattern
+4. Keep it to 2 short paragraphs
+5. This informs the Disaster Response Team persona specifically — write for someone deciding whether to treat this as isolated county issues or a regional event"""
+
+
 async def call_groq_api(messages: list[dict], max_tokens: int = 500) -> str:
     """
     Call the Groq API (OpenAI-compatible) for LLM inference.
@@ -188,6 +209,111 @@ Include [ref:] citations for every specific value mentioned, including the seaso
             crossing_date, crossing_phase, days_to_crossing, confidence,
             priority_score, detail_level, livelihood_zone, seasonal_outlook
         )
+
+
+async def generate_backtest_analysis(summary: dict) -> dict:
+    """
+    AI pattern analysis over the statistical backtest results.
+    Does NOT generate forecasts — only interprets already-computed hit/miss data.
+    """
+    context = {
+        "total_predictions": summary.get("total_predictions"),
+        "correct_predictions": summary.get("correct_predictions"),
+        "hit_rate": summary.get("hit_rate"),
+        "false_alarm_rate": summary.get("false_alarm_rate"),
+        "counties": summary.get("counties", []),
+    }
+
+    user_prompt = f"""Analyze this backtest data and identify patterns in where the AR(2) model performs well or poorly:
+
+{json.dumps(context, indent=2)}
+
+Write up what you find. Include [ref:] citations for every specific number mentioned."""
+
+    try:
+        messages = [
+            {"role": "system", "content": BACKTEST_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+        analysis = await call_groq_api(messages, max_tokens=600)
+
+        citation_pattern = r'\[ref:(\w+)=([^\]]+)\]'
+        citations = [
+            {"field": m.group(1), "value": m.group(2), "position": m.start()}
+            for m in re.finditer(citation_pattern, analysis)
+        ]
+
+        return {
+            "explanation": analysis,
+            "citations": citations,
+            "generated_at": datetime.now().isoformat(),
+            "model": settings.LLM_MODEL,
+        }
+    except Exception as e:
+        logger.error(f"Backtest analysis LLM call failed: {e}")
+        n = context["total_predictions"] or 0
+        return {
+            "explanation": (
+                f"Backtest evaluated [ref:total_predictions={n}] county-months. "
+                f"Overall hit rate: [ref:hit_rate={summary.get('hit_rate', 0)}]. "
+                f"Sample size is currently too small for a reliable pattern analysis — "
+                f"more historical bulletin data is needed per county."
+            ),
+            "citations": [{"field": "total_predictions", "value": str(n)}],
+            "generated_at": datetime.now().isoformat(),
+            "model": "template-fallback",
+        }
+
+
+async def generate_regional_synthesis(queue_items: list[dict]) -> dict:
+    """
+    Cross-county pattern synthesis over the current priority queue.
+    Reasons over already-computed phase/region/livelihood data — does not forecast.
+    """
+    context = [
+        {
+            "county": item.get("county_name"),
+            "region": item.get("region"),
+            "livelihood_zone": item.get("livelihood_zone"),
+            "phase": item.get("current_phase"),
+            "days_to_crossing": item.get("days_to_crossing"),
+        }
+        for item in queue_items
+    ]
+
+    user_prompt = f"""Current county statuses:
+
+{json.dumps(context, indent=2)}
+
+Identify any regional or livelihood-zone clustering among counties in Alert, Alarm, or Emergency phase. Cite each county referenced."""
+
+    try:
+        messages = [
+            {"role": "system", "content": REGIONAL_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+        analysis = await call_groq_api(messages, max_tokens=400)
+
+        citation_pattern = r'\[ref:(\w+)=([^\]]+)\]'
+        citations = [
+            {"field": m.group(1), "value": m.group(2), "position": m.start()}
+            for m in re.finditer(citation_pattern, analysis)
+        ]
+        return {
+            "synthesis": analysis,
+            "citations": citations,
+            "generated_at": datetime.now().isoformat(),
+            "model": settings.LLM_MODEL,
+        }
+    except Exception as e:
+        logger.error(f"Regional synthesis LLM call failed: {e}")
+        elevated = [c for c in context if c["phase"] not in (None, "Normal")]
+        return {
+            "synthesis": f"{len(elevated)} counties currently outside Normal phase. Regional synthesis unavailable — retry shortly.",
+            "citations": [],
+            "generated_at": datetime.now().isoformat(),
+            "model": "template-fallback",
+        }
 
 
 def generate_fallback_explanation(
