@@ -49,24 +49,6 @@ export interface CountyDetail {
   ai_explanation: string | null;
 }
 
-export interface SeasonalOutlook {
-  period: string;
-  rainfall_outlook: string;
-  temperature_outlook: string | null;
-  source_url: string;
-}
-
-export interface AiExplanation {
-  county_id: number;
-  county_name: string;
-  livelihood_zone: string | null;
-  seasonal_outlook: SeasonalOutlook | null;
-  explanation: string;
-  citations: { field: string; value: string; position?: number }[];
-  generated_at: string;
-  model: string;
-}
-
 export interface EvidenceRecord {
   id: number;
   county_id: number;
@@ -105,6 +87,21 @@ export interface BacktestSummary {
   }[];
 }
 
+export interface EvidenceStats {
+  total_records: number;
+  months_covered: number;
+  counties_covered: number;
+  phase_distribution: { phase: string; count: number }[];
+  last_updated: string | null;
+}
+
+export interface RefreshResult {
+  status: string;
+  total_records: number;
+  counties_covered: number;
+  last_updated: string | null;
+}
+
 export async function fetchPriorityQueue(filters?: {
   phase?: string;
   region?: string;
@@ -130,10 +127,7 @@ export async function fetchCountyDetail(id: number): Promise<CountyDetail> {
   return res.json();
 }
 
-export async function fetchCountyExplanation(
-  id: number,
-  detailLevel: 'summary' | 'full' = 'full'
-): Promise<AiExplanation> {
+export async function fetchCountyExplanation(id: number, detailLevel: 'summary' | 'full' = 'full') {
   const res = await fetch(`${API_BASE}/api/forecast/${id}/explain?detail_level=${detailLevel}`);
   if (!res.ok) throw new Error('Failed to fetch AI explanation');
   return res.json();
@@ -177,5 +171,26 @@ export async function fetchRegions(): Promise<string[]> {
 export async function fetchLivelihoodZones(): Promise<string[]> {
   const res = await fetch(`${API_BASE}/api/counties/livelihood-zones/list`);
   if (!res.ok) return [];
+  return res.json();
+}
+
+export async function fetchEvidenceStats(): Promise<EvidenceStats> {
+  const res = await fetch(`${API_BASE}/api/evidence/stats`);
+  if (!res.ok) throw new Error('Failed to fetch evidence stats');
+  return res.json();
+}
+
+/**
+ * Triggers a real, on-demand pull of NDMA's published bulletins on the
+ * backend (crawl -> parse -> upsert -> regenerate forecasts). This can take
+ * a while — it's a live network operation against NDMA's site, not a cache
+ * refresh — so callers should show a busy state for the duration.
+ */
+export async function refreshBulletins(): Promise<RefreshResult> {
+  const res = await fetch(`${API_BASE}/api/admin/refresh-bulletins`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to refresh NDMA data');
+  }
   return res.json();
 }
