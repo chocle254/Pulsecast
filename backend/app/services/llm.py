@@ -26,15 +26,18 @@ CRITICAL RULES:
 3. Be honest about uncertainty — if confidence is low, say so clearly
 4. Frame findings in terms of NDMA's official 5-phase system (Normal → Alert → Alarm → Emergency → Recovery)
 5. Make recommendations specific to the timeframe and severity
-6. Never overclaim accuracy — this is a proof-of-concept forecast, not an official NDMA classification
-7. Keep it concise — 3-5 sentences maximum for summaries, up to 3 paragraphs for detailed explanations
+6. Tailor guidance to the county's livelihood zone: pastoralist zones depend on livestock and grazing, agro-pastoralist zones depend on crops and grazing together, mixed zones lean more toward settled farming and markets. State what the forecast specifically implies for that zone — not a generic recommendation that would apply anywhere.
+7. When an ICPAC seasonal rainfall outlook is provided alongside the statistical forecast, reconcile the two explicitly. If they agree, say so and note it strengthens confidence in the forecast. If they disagree, flag the disagreement plainly and recommend treating the forecast as lower-confidence until the next bulletin — never silently pick one signal over the other.
+8. Never overclaim accuracy — this is a proof-of-concept forecast, not an official NDMA classification
+9. Keep it concise — 3-5 sentences maximum for summaries, up to 4 short paragraphs for detailed explanations
 
 FORMATTING:
 - Use [ref:VCI3M=XX.X] for VCI3M citations
 - Use [ref:SPI=X.XX] for SPI citations
 - Use [ref:phase=Phase] for phase citations
 - Use [ref:crossing=YYYY-MM-DD] for crossing date citations
-- Use [ref:confidence=XX%] for confidence citations"""
+- Use [ref:confidence=XX%] for confidence citations
+- Use [ref:seasonal_outlook=<period, e.g. Aug-Oct2026>] when citing the ICPAC seasonal outlook — cite the period only, describe its content in your own words in the prose"""
 
 
 async def call_groq_api(messages: list[dict], max_tokens: int = 500) -> str:
@@ -88,19 +91,26 @@ async def generate_explanation(
     confidence: Optional[float],
     priority_score: float,
     historical_trend: Optional[str] = None,
-    detail_level: str = "summary"
+    detail_level: str = "summary",
+    livelihood_zone: Optional[str] = None,
+    seasonal_outlook: Optional[dict] = None
 ) -> dict:
     """
     Generate a plain-language explanation of a county's forecast.
 
     Args:
         detail_level: "summary" (1-2 sentences for queue) or "full" (detailed for county page)
+        livelihood_zone: "pastoralist" / "agro-pastoralist" / "mixed" — drives the
+            livelihood-specific guidance section instead of a static frontend template
+        seasonal_outlook: optional dict from app.services.seasonal_outlook.fetch_seasonal_outlook()
+            — a second, independent signal the model reconciles against the statistical forecast
 
     Returns:
-        {explanation, citations, generated_at}
+        {explanation, citations, generated_at, model}
     """
     context = {
         "county": county_name,
+        "livelihood_zone": livelihood_zone,
         "current_phase": current_phase,
         "current_vci3m": current_vci3m,
         "current_spi": current_spi,
@@ -113,6 +123,13 @@ async def generate_explanation(
         "confidence": f"{confidence*100:.0f}%" if confidence else None,
         "priority_score": priority_score,
         "historical_trend": historical_trend,
+        "seasonal_outlook": (
+            {
+                "period": seasonal_outlook["period"],
+                "rainfall_outlook": seasonal_outlook["rainfall_outlook"],
+            }
+            if seasonal_outlook else None
+        ),
     }
 
     if detail_level == "summary":
@@ -120,18 +137,19 @@ async def generate_explanation(
 
 Data: {json.dumps(context, indent=2)}
 
-The sentence should convey: current status, what's coming, and urgency. Include [ref:] citations for key values."""
+The sentence should convey: current status, what's coming, and urgency. If seasonal_outlook is present and disagrees with the statistical forecast, briefly flag that. Include [ref:] citations for key values."""
     else:
-        user_prompt = f"""Generate a detailed explanation (2-3 paragraphs) for {county_name} county's drought forecast.
+        user_prompt = f"""Generate a detailed explanation (2-4 short paragraphs) for {county_name} county's drought forecast.
 
 Data: {json.dumps(context, indent=2)}
 
 Structure:
 1. Current situation — what phase, what the indicators show
 2. Forecast — what's projected, when any threshold crossing might happen, confidence level
-3. Recommended action — what a coordinator should consider given this forecast
+3. If seasonal_outlook is present, reconcile it explicitly with the statistical forecast — do they agree or disagree, and what that means for how much to trust this forecast right now
+4. Livelihood-specific guidance — given this county's livelihood_zone, what a coordinator should specifically prioritize (livestock, grazing and water for pastoralist zones; crops, food stocks and soil moisture for agro-pastoralist zones; markets and settled farming for mixed zones)
 
-Include [ref:] citations for every specific value mentioned."""
+Include [ref:] citations for every specific value mentioned, including the seasonal outlook if present."""
 
     try:
         messages = [
@@ -168,7 +186,7 @@ Include [ref:] citations for every specific value mentioned."""
         return generate_fallback_explanation(
             county_name, current_phase, current_vci3m, current_spi,
             crossing_date, crossing_phase, days_to_crossing, confidence,
-            priority_score, detail_level
+            priority_score, detail_level, livelihood_zone, seasonal_outlook
         )
 
 
@@ -182,7 +200,9 @@ def generate_fallback_explanation(
     days_to_crossing: Optional[int],
     confidence: Optional[float],
     priority_score: float,
-    detail_level: str = "summary"
+    detail_level: str = "summary",
+    livelihood_zone: Optional[str] = None,
+    seasonal_outlook: Optional[dict] = None
 ) -> dict:
     """
     Template-based fallback when the LLM API is unavailable.
@@ -265,6 +285,36 @@ def generate_fallback_explanation(
                 f"escalation appears necessary based on current projections."
             )
 
+        if seasonal_outlook:
+            period = seasonal_outlook.get("period", "the current season")
+            outlook_text = seasonal_outlook.get("rainfall_outlook", "")
+            parts.append(
+                f"\n\n**Regional Context:** ICPAC's seasonal rainfall outlook for "
+                f"[ref:seasonal_outlook={period}] reports: {outlook_text} Weigh this regional "
+                f"signal against the county-level forecast above before treating it as confirmed."
+            )
+            citations.append({"field": "seasonal_outlook", "value": period})
+
+        if livelihood_zone:
+            zone_note = {
+                "pastoralist": (
+                    "Pastoralist zone — prioritize early livestock vaccination, grazing "
+                    "corridor management, and water trucking readiness ahead of any phase shift."
+                ),
+                "agro-pastoralist": (
+                    "Agro-pastoralist zone — focus on crop residue preservation, soil moisture "
+                    "conservation, and food stock monitoring alongside livestock condition."
+                ),
+                "mixed": (
+                    "Mixed livelihood zone — monitor both settled farming output and local "
+                    "market food stock levels, since neither livestock nor crops alone drive this county's outcomes."
+                ),
+            }.get(
+                livelihood_zone,
+                "Monitor local livelihood indicators alongside this forecast.",
+            )
+            parts.append(f"\n\n**Livelihood Guidance ({livelihood_zone}):** {zone_note}")
+
     return {
         "explanation": "".join(parts),
         "citations": citations,
@@ -273,9 +323,15 @@ def generate_fallback_explanation(
     }
 
 
-async def generate_batch_summaries(counties_data: list[dict]) -> dict[int, str]:
+async def generate_batch_summaries(
+    counties_data: list[dict],
+    seasonal_outlook: Optional[dict] = None
+) -> dict[int, str]:
     """
     Generate summary explanations for multiple counties (for the priority queue).
+
+    `seasonal_outlook` is fetched once by the caller and shared across every
+    county in the batch — it's a regional signal, not county-specific.
     """
     summaries = {}
 
@@ -292,6 +348,8 @@ async def generate_batch_summaries(counties_data: list[dict]) -> dict[int, str]:
                 days_to_crossing=county.get("days_to_crossing"),
                 confidence=county.get("confidence"),
                 priority_score=county.get("priority_score", 0),
+                livelihood_zone=county.get("livelihood_zone"),
+                seasonal_outlook=seasonal_outlook,
                 detail_level="summary"
             )
             summaries[county["county_id"]] = result["explanation"]
