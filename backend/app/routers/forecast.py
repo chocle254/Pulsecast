@@ -11,7 +11,7 @@ from typing import Optional
 from app.database import execute_query, get_db
 from app.models import ForecastOut, BacktestRecord, BacktestSummary
 from app.services.forecast import generate_county_forecast
-from app.services.llm import generate_explanation
+from app.services.llm import generate_explanation, generate_backtest_analysis
 from app.services.calibration import compute_confidence_calibration
 from app.services.seasonal_outlook import fetch_seasonal_outlook
 
@@ -30,12 +30,12 @@ async def get_forecast(county_id: int):
         (county_id,),
         fetchone=True
     )
-    
+
     if not forecast:
         raise HTTPException(status_code=404, detail="No forecast found for this county")
-    
+
     forecast_values = json.loads(forecast["forecast_values"]) if forecast["forecast_values"] else []
-    
+
     return ForecastOut(
         county_id=forecast["county_id"],
         county_name=forecast["county_name"],
@@ -61,10 +61,10 @@ async def regenerate_forecast(county_id: int):
            ORDER BY month ASC""",
         (county_id,)
     )
-    
+
     if not historical:
         raise HTTPException(status_code=404, detail="No historical data for this county")
-    
+
     vci3m_series = [r["vci3m"] for r in historical]
     current_phase = historical[-1]["phase"]
 
@@ -76,7 +76,7 @@ async def regenerate_forecast(county_id: int):
         current_phase=current_phase,
         calibration=calibration
     )
-    
+
     # Save to database
     db = await get_db()
     try:
@@ -97,7 +97,7 @@ async def regenerate_forecast(county_id: int):
         await db.commit()
     finally:
         await db.close()
-    
+
     return forecast
 
 
@@ -117,24 +117,24 @@ async def get_explanation(
         (county_id,),
         fetchone=True
     )
-    
+
     if not county:
         raise HTTPException(status_code=404, detail="County not found")
-    
+
     forecast = await execute_query(
         """SELECT * FROM forecasts WHERE county_id = ?
            ORDER BY generated_at DESC LIMIT 1""",
         (county_id,),
         fetchone=True
     )
-    
+
     forecast_values = []
     crossing_date = None
     crossing_phase = None
     days_to_crossing = None
     confidence = None
     priority_score = 0
-    
+
     if forecast:
         forecast_values = json.loads(forecast["forecast_values"]) if forecast["forecast_values"] else []
         crossing_date = forecast.get("crossing_date")
@@ -142,7 +142,7 @@ async def get_explanation(
         days_to_crossing = forecast.get("days_to_crossing")
         confidence = forecast.get("confidence")
         priority_score = forecast.get("priority_score", 0)
-    
+
     # ICPAC's own regional seasonal outlook — the second signal the AI
     # reconciles against the statistical forecast, instead of just narrating
     # the forecast in isolation. Cached in-process; failures return None and
@@ -164,7 +164,7 @@ async def get_explanation(
         seasonal_outlook=seasonal_outlook,
         detail_level=detail_level
     )
-    
+
     # Cache the explanation
     if forecast:
         db = await get_db()
@@ -176,7 +176,7 @@ async def get_explanation(
             await db.commit()
         finally:
             await db.close()
-    
+
     return {
         "county_id": county_id,
         "county_name": county["name"],
@@ -188,16 +188,15 @@ async def get_explanation(
 
 # --- Backtest endpoints ---
 
-@router.get("/backtest/summary", response_model=BacktestSummary)
-async def get_backtest_summary():
+async def _compute_backtest_summary() -> BacktestSummary:
     """
-    Get aggregate backtest statistics.
-    
+    Compute aggregate backtest statistics.
+
     Compares each month's forecast (generated from prior months' data)
     against the actual phase reported in the following bulletin.
+    Factored out from the route so /backtest/analysis can call it directly
+    without going through HTTP.
     """
-    # For the seeded data, we generate backtests by comparing
-    # what AR(2) would have predicted at month N-1 vs actual at month N
     db = await get_db()
     try:
         cursor = await db.execute("""
@@ -206,12 +205,12 @@ async def get_backtest_summary():
             ORDER BY c.name
         """)
         counties = [dict(r) for r in await cursor.fetchall()]
-        
+
         total = 0
         correct = 0
         false_alarms = 0
         county_results = []
-        
+
         for county in counties:
             cursor = await db.execute(
                 """SELECT month, vci3m, phase FROM bulletins
@@ -220,23 +219,22 @@ async def get_backtest_summary():
                 (county["county_id"],)
             )
             rows = [dict(r) for r in await cursor.fetchall()]
-            
+
             if len(rows) < 4:
                 continue
-            
+
             county_total = 0
             county_correct = 0
             county_false_alarms = 0
-            
+
             # For each month after the first 3, compare backtest
             for i in range(3, len(rows)):
                 historical = [r["vci3m"] for r in rows[:i]]
                 actual_phase = rows[i]["phase"]
-                
-                # Generate what forecast would have been
+
                 from app.services.parser import classify_from_vci3m
                 from app.services.forecast import forecast_vci3m
-                
+
                 predicted_values = forecast_vci3m(historical, weeks=4)
                 if predicted_values:
                     predicted_vci3m = predicted_values[-1]["vci3m"]
@@ -244,11 +242,11 @@ async def get_backtest_summary():
                 else:
                     predicted_phase = rows[i-1]["phase"]
                     predicted_vci3m = rows[i-1]["vci3m"]
-                
+
                 hit = (predicted_phase == actual_phase)
                 total += 1
                 county_total += 1
-                
+
                 if hit:
                     correct += 1
                     county_correct += 1
@@ -257,7 +255,7 @@ async def get_backtest_summary():
                     if get_phase_severity(predicted_phase) > get_phase_severity(actual_phase):
                         false_alarms += 1
                         county_false_alarms += 1
-            
+
             if county_total > 0:
                 county_results.append({
                     "county_id": county["county_id"],
@@ -267,7 +265,7 @@ async def get_backtest_summary():
                     "hit_rate": round(county_correct / county_total, 3),
                     "false_alarms": county_false_alarms,
                 })
-        
+
         return BacktestSummary(
             total_predictions=total,
             correct_predictions=correct,
@@ -277,6 +275,20 @@ async def get_backtest_summary():
         )
     finally:
         await db.close()
+
+
+@router.get("/backtest/summary", response_model=BacktestSummary)
+async def get_backtest_summary():
+    """Get aggregate backtest statistics."""
+    return await _compute_backtest_summary()
+
+
+@router.get("/backtest/analysis")
+async def get_backtest_analysis():
+    """AI pattern analysis over the backtest results."""
+    summary = await _compute_backtest_summary()
+    result = await generate_backtest_analysis(summary.model_dump())
+    return result
 
 
 @router.get("/backtest/{county_id}")
@@ -293,19 +305,19 @@ async def get_county_backtest(county_id: int):
             (county_id,)
         )
         rows = [dict(r) for r in await cursor.fetchall()]
-        
+
         if len(rows) < 4:
             return {"county_id": county_id, "records": [], "summary": {}}
-        
+
         records = []
         for i in range(3, len(rows)):
             historical = [r["vci3m"] for r in rows[:i]]
             actual_phase = rows[i]["phase"]
             actual_vci3m = rows[i]["vci3m"]
-            
+
             from app.services.parser import classify_from_vci3m
             from app.services.forecast import forecast_vci3m
-            
+
             predicted_values = forecast_vci3m(historical, weeks=4)
             if predicted_values:
                 predicted_vci3m = predicted_values[-1]["vci3m"]
@@ -313,7 +325,7 @@ async def get_county_backtest(county_id: int):
             else:
                 predicted_phase = rows[i-1]["phase"]
                 predicted_vci3m = rows[i-1]["vci3m"]
-            
+
             records.append(BacktestRecord(
                 county_id=county_id,
                 county_name=rows[0]["county_name"],
@@ -324,10 +336,10 @@ async def get_county_backtest(county_id: int):
                 actual_vci3m=round(actual_vci3m, 1),
                 hit=(predicted_phase == actual_phase),
             ))
-        
+
         total = len(records)
         correct = sum(1 for r in records if r.hit)
-        
+
         return {
             "county_id": county_id,
             "county_name": rows[0]["county_name"],
