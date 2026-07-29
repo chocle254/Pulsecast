@@ -5,38 +5,52 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 
 :root {
-  /* Field Paper Palette */
-  --bg-app: #EDEEE8;
-  --bg-surface: #F6F6F2;
+  /* Cool neutral base — deliberately NOT warm/cream: this needs to survive
+     projector lighting and long screen time without glare or feeling like
+     a printed field notebook. */
+  --bg-app: #F1F3F6;
+  --bg-surface: #F8F9FB;
   --bg-card: #FFFFFF;
-  --bg-elevated: #F8F9F5;
-  --ink: #232A2E;
-  --ink-muted: #5B6560;
-  --ink-light: #8A948E;
-  --border-subtle: #DDE0D8;
-  --border-medium: #C8CCC0;
-  --border-strong: #A3A89A;
+  --bg-elevated: #FCFDFE;
+  --ink: #171B21;
+  --ink-muted: #5C6470;
+  --ink-light: #8992A0;
+  --border-subtle: #E3E6EC;
+  --border-medium: #D2D6DF;
+  --border-strong: #AAB1BE;
 
-  /* NDMA 5-Phase Ramp */
-  --phase-normal: #7A9B76;
-  --phase-normal-bg: #EAF2E8;
-  --phase-normal-border: #A2C49E;
+  /* NDMA phase ramp — bold and saturated, not pastel. Severity should be
+     legible from across a room: Alert reads amber, Alarm reads orange,
+     Emergency reads red, at a glance, before anyone reads the label. */
+  --phase-normal: #16A34A;
+  --phase-normal-bg: #ECFBF1;
+  --phase-normal-border: #4ADE80;
+  --phase-normal-glow: rgba(22, 163, 74, 0.35);
 
-  --phase-alert: #C9A24B;
-  --phase-alert-bg: #FDF7E7;
-  --phase-alert-border: #E0BE6C;
+  --phase-pre-alert: #CA8A04;
+  --phase-pre-alert-bg: #FEF9E7;
+  --phase-pre-alert-border: #FACC15;
+  --phase-pre-alert-glow: rgba(202, 138, 4, 0.35);
 
-  --phase-alarm: #B9713A;
-  --phase-alarm-bg: #FBF0E6;
-  --phase-alarm-border: #D89562;
+  --phase-alert: #D97706;
+  --phase-alert-bg: #FEF3E2;
+  --phase-alert-border: #FB923C;
+  --phase-alert-glow: rgba(217, 119, 6, 0.4);
 
-  --phase-emergency: #9B3B34;
-  --phase-emergency-bg: #FAECEB;
-  --phase-emergency-border: #C46760;
+  --phase-alarm: #EA580C;
+  --phase-alarm-bg: #FFEDE3;
+  --phase-alarm-border: #FB923C;
+  --phase-alarm-glow: rgba(234, 88, 12, 0.45);
 
-  --phase-recovery: #4A8B8C;
-  --phase-recovery-bg: #E8F4F4;
-  --phase-recovery-border: #74AFB0;
+  --phase-emergency: #DC2626;
+  --phase-emergency-bg: #FEECEC;
+  --phase-emergency-border: #F87171;
+  --phase-emergency-glow: rgba(220, 38, 38, 0.5);
+
+  --phase-recovery: #0891B2;
+  --phase-recovery-bg: #E5F7FB;
+  --phase-recovery-border: #22D3EE;
+  --phase-recovery-glow: rgba(8, 145, 178, 0.35);
 
   /* Typography Fonts */
   --font-display: 'Space Grotesk', -apple-system, sans-serif;
@@ -47,8 +61,9 @@
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
-  --shadow-subtle: 0 1px 3px rgba(35, 42, 46, 0.05), 0 1px 2px rgba(35, 42, 46, 0.03);
-  --shadow-card: 0 4px 12px rgba(35, 42, 46, 0.06), 0 1px 3px rgba(35, 42, 46, 0.04);
+  --shadow-subtle: 0 1px 3px rgba(23, 27, 33, 0.05), 0 1px 2px rgba(23, 27, 33, 0.03);
+  --shadow-card: 0 4px 16px rgba(23, 27, 33, 0.07), 0 1px 3px rgba(23, 27, 33, 0.04);
+  --shadow-float: 0 16px 32px rgba(23, 27, 33, 0.12), 0 4px 10px rgba(23, 27, 33, 0.06);
 
   /* Animation */
   --transition-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -215,6 +230,13 @@
 }
 .phase-badge.phase-normal .phase-dot { background: var(--phase-normal); }
 
+.phase-badge.phase-pre-alert {
+  background: var(--phase-pre-alert-bg);
+  color: #8A6D04;
+  border-color: var(--phase-pre-alert-border);
+}
+.phase-badge.phase-pre-alert .phase-dot { background: var(--phase-pre-alert); }
+
 .phase-badge.phase-alert {
   background: var(--phase-alert-bg);
   color: #7D5D18;
@@ -251,6 +273,37 @@
   box-shadow: var(--shadow-card);
   padding: 1.25rem;
 }
+
+/* === SEVERITY-GLOW COUNTY CARDS ===
+   Base lift mechanics + per-phase glow color. The glow intensity is what
+   should make "Alert" actually feel like alert — not just a colored label,
+   a card that visibly radiates warmth proportional to how bad it is. */
+.county-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  transition: transform var(--transition-normal), box-shadow var(--transition-normal), border-color var(--transition-normal);
+  cursor: pointer;
+  will-change: transform;
+}
+
+.county-card:hover,
+.county-card:focus-visible {
+  transform: translateY(-6px);
+}
+
+.county-card.glow-normal:hover { border-color: var(--phase-normal); box-shadow: var(--shadow-float), 0 0 28px var(--phase-normal-glow); }
+.county-card.glow-pre-alert:hover { border-color: var(--phase-pre-alert); box-shadow: var(--shadow-float), 0 0 28px var(--phase-pre-alert-glow); }
+.county-card.glow-alert:hover { border-color: var(--phase-alert); box-shadow: var(--shadow-float), 0 0 32px var(--phase-alert-glow); }
+.county-card.glow-alarm:hover { border-color: var(--phase-alarm); box-shadow: var(--shadow-float), 0 0 36px var(--phase-alarm-glow); }
+.county-card.glow-emergency:hover { border-color: var(--phase-emergency); box-shadow: var(--shadow-float), 0 0 40px var(--phase-emergency-glow); }
+.county-card.glow-recovery:hover { border-color: var(--phase-recovery); box-shadow: var(--shadow-float), 0 0 28px var(--phase-recovery-glow); }
+
+/* Emergency/Alarm cards carry a resting ambient glow even before hover —
+   these are the ones that should visually insist on attention. */
+.county-card.ambient-glow-emergency { box-shadow: var(--shadow-card), 0 0 0 1px var(--phase-emergency-border), 0 0 20px var(--phase-emergency-glow); }
+.county-card.ambient-glow-alarm { box-shadow: var(--shadow-card), 0 0 0 1px var(--phase-alarm-border), 0 0 14px var(--phase-alarm-glow); }
 
 /* === MOTION DESIGN SYSTEM === */
 
@@ -356,6 +409,169 @@
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
   border-radius: var(--radius-sm);
+}
+
+/* === SIDEBAR NAVIGATION === */
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-medium);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem 1.25rem 1rem;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--ink-muted);
+  font-weight: 500;
+  font-size: 0.9rem;
+  transition: all var(--transition-fast);
+  border-left: 3px solid transparent;
+}
+
+.sidebar-link:hover {
+  color: var(--ink);
+  background: var(--bg-elevated);
+}
+
+.sidebar-link.active {
+  color: var(--ink);
+  background: var(--bg-card);
+  border-left: 3px solid var(--ink);
+  font-weight: 600;
+  box-shadow: var(--shadow-subtle);
+}
+
+.sidebar-footer {
+  padding: 1rem;
+  border-top: 1px solid var(--border-medium);
+}
+
+.data-update-card {
+  background: var(--phase-normal-bg);
+  border: 1px solid var(--phase-normal-border);
+  border-radius: var(--radius-md);
+  padding: 0.85rem;
+  font-size: 0.8rem;
+}
+
+.data-update-card.is-stale {
+  background: var(--bg-elevated);
+  border-color: var(--border-medium);
+}
+
+.refresh-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  margin-top: 0.6rem;
+  padding: 0.45rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-medium);
+  background: var(--bg-card);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--bg-card);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.refresh-spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Live pulse indicator — small radar-style ping used next to "live" data */
+.live-pulse {
+  position: relative;
+  display: inline-flex;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--phase-alarm);
+  flex-shrink: 0;
+}
+
+.live-pulse::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: var(--phase-alarm);
+  opacity: 0.5;
+  animation: pulseRing 2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+@keyframes pulseRing {
+  0% { transform: scale(0.6); opacity: 0.6; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* Sweep highlight — a single light pass across the hero stat bar on load */
+@keyframes sweep {
+  0% { transform: translateX(-120%) skewX(-15deg); }
+  100% { transform: translateX(220%) skewX(-15deg); }
+}
+
+.sweep-highlight {
+  position: relative;
+  overflow: hidden;
+}
+
+.sweep-highlight::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
+  animation: sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) 0.3s 1 both;
+  pointer-events: none;
 }
 
 /* Reduced Motion */
