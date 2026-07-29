@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Map, ArrowRight, ShieldAlert } from 'lucide-react';
 import KenyaMap from '@/components/KenyaMap';
 import PhaseBadge from '@/components/PhaseBadge';
+import { formatInlineText } from '@/components/FormattedText';
 import { fetchMapData, fetchCountyDetail, MapCountyData, CountyDetail } from '@/lib/api';
 
 export default function RegionalMapPage() {
@@ -130,7 +131,7 @@ export default function RegionalMapPage() {
                   <span className="font-mono font-bold text-[10px] text-[#3B5A37] uppercase block mb-1">
                     AI Forecast Note:
                   </span>
-                  {selectedCounty.ai_explanation.replace(/\[ref:[^\]]+\]/g, (m) => m.split('=')[1] || m)}
+                  {formatInlineText(selectedCounty.ai_explanation)}
                 </div>
               )}
 
