@@ -11,6 +11,7 @@ from app.database import execute_query
 from app.models import (
     CountyOut, CountyDetail, PriorityQueueItem, MapCountyData
 )
+from app.services.llm import generate_regional_synthesis
 
 router = APIRouter(prefix="/api/counties", tags=["counties"])
 
@@ -29,7 +30,7 @@ async def list_counties(
             AND b.month = (SELECT MAX(month) FROM bulletins WHERE county_id = c.id)
     """
     params = []
-    
+
     conditions = []
     if region:
         conditions.append("c.region = ?")
@@ -37,28 +38,28 @@ async def list_counties(
     if livelihood_zone:
         conditions.append("c.livelihood_zone = ?")
         params.append(livelihood_zone)
-    
+
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
-    
+
     query += " ORDER BY c.name"
-    
+
     rows = await execute_query(query, tuple(params))
     return [CountyOut(**row) for row in rows]
 
 
-@router.get("/priority-queue", response_model=list[PriorityQueueItem])
-async def get_priority_queue(
-    phase: Optional[str] = Query(None, description="Filter by phase"),
-    region: Optional[str] = Query(None, description="Filter by region"),
-    livelihood_zone: Optional[str] = Query(None, description="Filter by livelihood zone"),
-    sort_by: str = Query("priority_score", description="Sort field"),
-    sort_order: str = Query("desc", description="Sort order: asc or desc"),
-    limit: int = Query(47, description="Max results"),
-):
+async def _priority_queue_data(
+    phase: Optional[str] = None,
+    region: Optional[str] = None,
+    livelihood_zone: Optional[str] = None,
+    sort_by: str = "priority_score",
+    sort_order: str = "desc",
+    limit: int = 47,
+) -> list[PriorityQueueItem]:
     """
-    Get the ranked priority queue of all counties.
-    Returns counties sorted by priority score (urgency).
+    Core priority-queue logic, factored out from the route so other
+    endpoints (e.g. regional synthesis) can call it directly with plain
+    Python arguments instead of through FastAPI's Query() defaults.
     """
     query = """
         SELECT c.id as county_id, c.name as county_name, c.region, c.livelihood_zone,
@@ -76,7 +77,7 @@ async def get_priority_queue(
     # A priority queue must contain reported conditions, never placeholder
     # classifications for counties whose bulletin has not been published.
     conditions = ["b.id IS NOT NULL"]
-    
+
     if phase:
         conditions.append("b.phase = ?")
         params.append(phase)
@@ -86,15 +87,15 @@ async def get_priority_queue(
     if livelihood_zone:
         conditions.append("c.livelihood_zone = ?")
         params.append(livelihood_zone)
-    
+
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
-    
+
     # Sort
     valid_sorts = {"priority_score", "days_to_crossing", "current_vci3m", "county_name"}
     sort_field = sort_by if sort_by in valid_sorts else "priority_score"
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
-    
+
     if sort_field == "priority_score":
         query += f" ORDER BY COALESCE(f.priority_score, 0) {order}"
     elif sort_field == "days_to_crossing":
@@ -103,12 +104,12 @@ async def get_priority_queue(
         query += f" ORDER BY COALESCE(b.vci3m, 100) {'ASC' if order == 'DESC' else 'DESC'}"
     else:
         query += f" ORDER BY c.name {order}"
-    
+
     query += " LIMIT ?"
     params.append(limit)
-    
+
     rows = await execute_query(query, tuple(params))
-    
+
     # Build priority queue items with sparkline data
     items = []
     for rank, row in enumerate(rows, 1):
@@ -120,11 +121,11 @@ async def get_priority_queue(
         """
         sparkline_rows = await execute_query(sparkline_query, (row["county_id"],))
         sparkline = [r["vci3m"] for r in reversed(sparkline_rows)]
-        
+
         # Add forecast values to sparkline
         forecast_values = json.loads(row["forecast_values"]) if row.get("forecast_values") else []
         forecast_vci3m = forecast_values[-1]["vci3m"] if forecast_values else None
-        
+
         items.append(PriorityQueueItem(
             rank=rank,
             county_id=row["county_id"],
@@ -142,8 +143,34 @@ async def get_priority_queue(
             sparkline_data=sparkline,
             ai_summary=row.get("ai_summary"),
         ))
-    
+
     return items
+
+
+@router.get("/priority-queue", response_model=list[PriorityQueueItem])
+async def get_priority_queue(
+    phase: Optional[str] = Query(None, description="Filter by phase"),
+    region: Optional[str] = Query(None, description="Filter by region"),
+    livelihood_zone: Optional[str] = Query(None, description="Filter by livelihood zone"),
+    sort_by: str = Query("priority_score", description="Sort field"),
+    sort_order: str = Query("desc", description="Sort order: asc or desc"),
+    limit: int = Query(47, description="Max results"),
+):
+    """
+    Get the ranked priority queue of all counties.
+    Returns counties sorted by priority score (urgency).
+    """
+    return await _priority_queue_data(
+        phase=phase, region=region, livelihood_zone=livelihood_zone,
+        sort_by=sort_by, sort_order=sort_order, limit=limit,
+    )
+
+
+@router.get("/regional-synthesis")
+async def get_regional_synthesis():
+    """AI cross-county pattern synthesis over the current priority queue."""
+    queue = await _priority_queue_data(limit=47)
+    return await generate_regional_synthesis([item.model_dump() for item in queue])
 
 
 @router.get("/map-data", response_model=list[MapCountyData])
@@ -186,17 +213,17 @@ async def get_county_detail(county_id: int):
         (county_id,),
         fetchone=True
     )
-    
+
     if not county:
         raise HTTPException(status_code=404, detail="County not found")
-    
+
     # Historical data
     historical = await execute_query(
         """SELECT month, vci3m, spi, phase, source_url, source_page
            FROM bulletins WHERE county_id = ? ORDER BY month ASC""",
         (county_id,)
     )
-    
+
     # Latest forecast
     forecast_row = await execute_query(
         """SELECT * FROM forecasts WHERE county_id = ?
@@ -204,7 +231,7 @@ async def get_county_detail(county_id: int):
         (county_id,),
         fetchone=True
     )
-    
+
     forecast = None
     ai_explanation = None
     if forecast_row:
@@ -219,7 +246,7 @@ async def get_county_detail(county_id: int):
             "priority_score": forecast_row.get("priority_score"),
         }
         ai_explanation = forecast_row.get("ai_explanation")
-    
+
     return CountyDetail(
         id=county["id"],
         name=county["name"],
