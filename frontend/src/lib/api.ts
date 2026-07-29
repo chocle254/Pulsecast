@@ -49,6 +49,24 @@ export interface CountyDetail {
   ai_explanation: string | null;
 }
 
+export interface SeasonalOutlook {
+  period: string;
+  rainfall_outlook: string;
+  temperature_outlook: string | null;
+  source_url: string;
+}
+
+export interface AiExplanation {
+  county_id: number;
+  county_name: string;
+  livelihood_zone: string | null;
+  seasonal_outlook: SeasonalOutlook | null;
+  explanation: string;
+  citations: { field: string; value: string; position?: number }[];
+  generated_at: string;
+  model: string;
+}
+
 export interface EvidenceRecord {
   id: number;
   county_id: number;
@@ -127,7 +145,10 @@ export async function fetchCountyDetail(id: number): Promise<CountyDetail> {
   return res.json();
 }
 
-export async function fetchCountyExplanation(id: number, detailLevel: 'summary' | 'full' = 'full') {
+export async function fetchCountyExplanation(
+  id: number,
+  detailLevel: 'summary' | 'full' = 'full'
+): Promise<AiExplanation> {
   const res = await fetch(`${API_BASE}/api/forecast/${id}/explain?detail_level=${detailLevel}`);
   if (!res.ok) throw new Error('Failed to fetch AI explanation');
   return res.json();
