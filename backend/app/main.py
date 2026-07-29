@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import init_db
 from app.services.seeder import seed_database
-from app.routers import counties, forecast, evidence
+from app.routers import counties, forecast, evidence, admin
 
 # Configure logging
 logging.basicConfig(
@@ -64,6 +64,7 @@ app.add_middleware(
 app.include_router(counties.router)
 app.include_router(forecast.router)
 app.include_router(evidence.router)
+app.include_router(admin.router)
 
 
 @app.get("/")
