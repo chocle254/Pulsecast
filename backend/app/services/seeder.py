@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from app.database import get_db, init_db
 from app.services.calibration import compute_confidence_calibration
 from app.services.forecast import generate_county_forecast
+from app.services.historical_seed import expand_historical_records
 from app.services.ingestion import ALL_COUNTIES, ingest_all_bulletins
 from app.services.parser import parse_county_bulletin
 
@@ -52,6 +53,12 @@ async def seed_database() -> None:
 
         cursor = await db.execute("SELECT id, name FROM counties")
         county_ids = {row["name"]: row["id"] for row in await cursor.fetchall()}
+
+        # Real historical NDMA phase data (Sept 2022 - Feb 2026), found via
+        # search since NDMA's own archive is gated behind a JS grid this
+        # scraper can't crawl live — see historical_seed.py docstring. Never
+        # overwrites a real live-parsed record for the same (county, month).
+        backfilled = await _backfill_historical_data(db, county_ids)
 
         inserted_records = 0
         parsed_at = datetime.now(timezone.utc).isoformat()
@@ -98,7 +105,7 @@ async def seed_database() -> None:
 
         await db.commit()
 
-        if not inserted_records:
+        if not inserted_records and not backfilled:
             cursor = await db.execute("SELECT COUNT(*) AS count FROM bulletins")
             existing_records = (await cursor.fetchone())["count"]
             if not existing_records:
@@ -113,9 +120,50 @@ async def seed_database() -> None:
 
         await _regenerate_forecasts(db)
         await db.commit()
-        logger.info("Loaded %s official NDMA bulletin records", inserted_records)
+        logger.info(
+            "Loaded %s live NDMA bulletin records + %s historical backfill records",
+            inserted_records, backfilled,
+        )
     finally:
         await db.close()
+
+
+async def _backfill_historical_data(db, county_ids: dict) -> int:
+    """
+    Insert real historical NDMA phase records (see historical_seed.py).
+    Uses DO NOTHING on conflict — a real, live-parsed record for the same
+    (county, month) always wins over this backfill; this only fills gaps.
+    """
+    parsed_at = datetime.now(timezone.utc).isoformat()
+    records = expand_historical_records(ALL_COUNTIES)
+    inserted = 0
+
+    for record in records:
+        county_id = county_ids.get(record["county_name"])
+        if county_id is None:
+            continue
+
+        cursor = await db.execute(
+            """INSERT INTO bulletins
+               (county_id, month, vci3m, spi, phase, source_url, source_page, parsed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(county_id, month) DO NOTHING""",
+            (
+                county_id,
+                record["month"],
+                record["vci3m"],
+                record["spi"],
+                record["phase"],
+                record["source_url"],
+                record["source_page"],
+                parsed_at,
+            ),
+        )
+        if cursor.rowcount:
+            inserted += 1
+
+    await db.commit()
+    return inserted
 
 
 async def _regenerate_forecasts(db) -> None:
