@@ -7,6 +7,7 @@ import PhaseBadge from '@/components/PhaseBadge';
 import Sparkline from '@/components/Sparkline';
 import KenyaMap from '@/components/KenyaMap';
 import CountUp from '@/components/CountUp';
+import { formatInlineText } from '@/components/FormattedText';
 import { fetchPriorityQueue, fetchRegions, fetchLivelihoodZones, fetchMapData, PriorityItem, MapCountyData } from '@/lib/api';
 
 const PHASE_BORDER_COLORS: Record<string, string> = {
@@ -347,10 +348,7 @@ export default function PriorityQueuePage() {
                           AI Note
                         </span>
                         <p className="line-clamp-2 leading-relaxed">
-                          {item.ai_summary.replace(/\[ref:[^\]]+\]/g, (match) => {
-                            const parts = match.slice(5, -1).split('=');
-                            return parts[1] || match;
-                          })}
+                          {formatInlineText(item.ai_summary)}
                         </p>
                       </div>
                     )}
