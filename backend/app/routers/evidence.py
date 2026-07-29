@@ -81,10 +81,15 @@ async def get_evidence_stats():
     phase_dist = await execute_query(
         "SELECT phase, COUNT(*) as count FROM bulletins GROUP BY phase ORDER BY count DESC"
     )
-    
+
+    last_updated = await execute_query(
+        "SELECT MAX(parsed_at) as ts FROM bulletins", fetchone=True
+    )
+
     return {
         "total_records": total["count"] if total else 0,
         "months_covered": months["count"] if months else 0,
         "counties_covered": counties["count"] if counties else 0,
         "phase_distribution": phase_dist,
+        "last_updated": last_updated["ts"] if last_updated else None,
     }
