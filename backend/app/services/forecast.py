@@ -152,7 +152,8 @@ def detect_threshold_crossing(
     current_vci3m: float,
     current_phase: str,
     forecast_values: list[dict],
-    base_date: Optional[datetime] = None
+    base_date: Optional[datetime] = None,
+    calibration: Optional[dict] = None
 ) -> dict:
     """
     Detect when a forecast crosses into a worse phase.
@@ -180,9 +181,15 @@ def detect_threshold_crossing(
             crossing_date = base + timedelta(weeks=point["week"])
             days = point["week"] * 7
             
-            # Confidence decreases with forecast horizon and uncertainty
+            # Confidence decreases with forecast horizon and uncertainty.
+            # Anchor to the empirical backtest hit-rate when available,
+            # instead of the fixed 1.0 starting point.
             band_width = point["upper"] - point["lower"]
-            base_confidence = max(0.3, 1.0 - (point["week"] * 0.08))
+            if calibration and calibration.get("hit_rate") is not None:
+                anchor = calibration["hit_rate"]
+                base_confidence = max(0.3, anchor - (point["week"] * 0.03))
+            else:
+                base_confidence = max(0.3, 1.0 - (point["week"] * 0.08))
             
             # Adjust confidence based on how far into the threshold the forecast goes
             threshold = VCI3M_THRESHOLDS.get(current_phase, VCI3M_THRESHOLDS["Normal"])
@@ -249,7 +256,8 @@ def generate_county_forecast(
     county_id: int,
     historical_vci3m: list[float],
     current_phase: str,
-    forecast_weeks: int = 6
+    forecast_weeks: int = 6,
+    calibration: Optional[dict] = None
 ) -> dict:
     """
     Generate a complete forecast for a single county.
@@ -275,7 +283,7 @@ def generate_county_forecast(
     
     # Detect crossing
     crossing = detect_threshold_crossing(
-        current_vci3m, current_phase, forecast_values
+        current_vci3m, current_phase, forecast_values, calibration=calibration
     )
     
     # Calculate priority
