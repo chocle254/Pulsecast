@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, Clock, ShieldAlert, FileText, Info, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react';
 import PhaseBadge from '@/components/PhaseBadge';
 import ThresholdChart from '@/components/ThresholdChart';
+import FormattedText from '@/components/FormattedText';
 import { fetchCountyDetail, fetchCountyExplanation, CountyDetail, AiExplanation } from '@/lib/api';
 
 export default function CountyDetailPage() {
@@ -80,28 +81,7 @@ export default function CountyDetailPage() {
   const { forecast } = data;
 
   // Format AI text to render cited numbers as interactive badges
-  const renderFormattedExplanation = (text: string) => {
-    if (!text) return null;
-    const parts = text.split(/(\[ref:[^\]]+\])/g);
-
-    return parts.map((part, idx) => {
-      if (part.startsWith('[ref:')) {
-        const match = part.slice(5, -1).split('=');
-        const field = match[0];
-        const val = match[1] || '';
-        return (
-          <span
-            key={idx}
-            className="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded font-mono text-xs font-semibold bg-[#EAF2E8] text-[#3B5A37] border border-[#A2C49E] cursor-help"
-            title={`Cited source indicator: ${field}`}
-          >
-            {val}
-          </span>
-        );
-      }
-      return <span key={idx}>{part}</span>;
-    });
-  };
+  const renderFormattedExplanation = (text: string) => <FormattedText text={text} className="space-y-0" />;
 
   return (
     <div className="container pt-6 space-y-6">
