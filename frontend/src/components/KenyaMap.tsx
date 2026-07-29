@@ -8,6 +8,9 @@ import { KENYA_COUNTY_PATHS, KENYA_MAP_VIEWBOX } from '@/lib/kenyaCountyPaths';
 interface KenyaMapProps {
   counties: MapCountyData[];
   onSelectCounty?: (countyId: number) => void;
+  /** Smaller embedded rendering for the homepage dashboard — shorter map,
+   *  no repeated phase-count strip (the legend above already covers it). */
+  compact?: boolean;
 }
 
 // Phases in legend order, mapped to the app's shared --phase-* CSS custom
@@ -20,7 +23,7 @@ function phaseColorVar(phase: string): string {
   return `var(--phase-${phase.toLowerCase()})`;
 }
 
-export default function KenyaMap({ counties, onSelectCounty }: KenyaMapProps) {
+export default function KenyaMap({ counties, onSelectCounty, compact = false }: KenyaMapProps) {
   const [hoveredCounty, setHoveredCounty] = useState<MapCountyData | null>(null);
 
   const countyDataMap = useMemo(() => {
@@ -45,7 +48,7 @@ export default function KenyaMap({ counties, onSelectCounty }: KenyaMapProps) {
         <div>
           <h3 className="text-base font-bold">Regional Drought Map</h3>
           <p className="text-xs text-gray-500 font-mono">
-            Spatial distribution across Kenya&apos;s 47 counties
+            Spatial distribution across Kenya&apos;s 23 ASAL counties
           </p>
         </div>
 
@@ -68,7 +71,7 @@ export default function KenyaMap({ counties, onSelectCounty }: KenyaMapProps) {
       </div>
 
       {/* SVG Map: accurate Kenya county boundaries */}
-      <div className="relative w-full overflow-hidden flex justify-center items-center min-h-[560px] bg-[#EDEEE8]/40 rounded-md border border-gray-200">
+      <div className={`relative w-full overflow-hidden flex justify-center items-center ${compact ? 'min-h-[320px]' : 'min-h-[560px]'} bg-[#EDEEE8]/40 rounded-md border border-gray-200`}>
         <svg viewBox={KENYA_MAP_VIEWBOX} className="w-full max-w-[560px] h-auto">
           {KENYA_COUNTY_PATHS.map(({ id, name, path }) => {
             const data = countyDataMap.get(name);
@@ -129,20 +132,23 @@ export default function KenyaMap({ counties, onSelectCounty }: KenyaMapProps) {
       </div>
 
       {/* Phase Summary strip */}
-      <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs font-mono">
-        <span className="text-gray-500">{counties.length} counties reporting</span>
-        {PHASES.map((phase) => (
-          <div key={phase} className="flex items-center gap-1.5">
-            <span
-              className="w-2.5 h-2.5 rounded-full inline-block"
-              style={{ backgroundColor: phaseColorVar(phase) }}
-            />
-            <span className="text-gray-700">
-              {phase} <span className="font-bold text-gray-900">{phaseCounts[phase]}</span>
-            </span>
-          </div>
-        ))}
-      </div>
+      {!compact && (
+        <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs font-mono">
+          <span className="text-gray-500">{counties.length} counties reporting</span>
+          {PHASES.map((phase) => (
+            <div key={phase} className="flex items-center gap-1.5">
+              <span
+                className="w-2.5 h-2.5 rounded-full inline-block"
+                style={{ backgroundColor: phaseColorVar(phase) }}
+              />
+              <span className="text-gray-700">
+                {phase} <span className="font-bold text-gray-900">{phaseCounts[phase]}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
+
