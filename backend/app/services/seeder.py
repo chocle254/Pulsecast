@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.database import get_db, init_db
+from app.services.calibration import compute_confidence_calibration
 from app.services.forecast import generate_county_forecast
 from app.services.ingestion import ALL_COUNTIES, ingest_all_bulletins
 from app.services.parser import parse_county_bulletin
@@ -122,6 +123,11 @@ async def _regenerate_forecasts(db) -> None:
     cursor = await db.execute("SELECT id FROM counties")
     county_ids = [row["id"] for row in await cursor.fetchall()]
 
+    # Computed once per run and reused for every county — this is a global
+    # empirical hit-rate from backtesting the app's own past forecasts, not
+    # a per-county figure. See app/services/calibration.py.
+    calibration = await compute_confidence_calibration()
+
     for county_id in county_ids:
         cursor = await db.execute(
             """SELECT vci3m, phase FROM bulletins
@@ -138,6 +144,7 @@ async def _regenerate_forecasts(db) -> None:
             county_id=county_id,
             historical_vci3m=vci3m_series,
             current_phase=rows[-1]["phase"],
+            calibration=calibration,
         )
         await db.execute(
             """INSERT INTO forecasts
