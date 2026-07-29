@@ -12,6 +12,8 @@ from app.database import execute_query, get_db
 from app.models import ForecastOut, BacktestRecord, BacktestSummary
 from app.services.forecast import generate_county_forecast
 from app.services.llm import generate_explanation
+from app.services.calibration import compute_confidence_calibration
+from app.services.seasonal_outlook import fetch_seasonal_outlook
 
 router = APIRouter(prefix="/api/forecast", tags=["forecast"])
 
@@ -65,11 +67,14 @@ async def regenerate_forecast(county_id: int):
     
     vci3m_series = [r["vci3m"] for r in historical]
     current_phase = historical[-1]["phase"]
-    
+
+    calibration = await compute_confidence_calibration()
+
     forecast = generate_county_forecast(
         county_id=county_id,
         historical_vci3m=vci3m_series,
-        current_phase=current_phase
+        current_phase=current_phase,
+        calibration=calibration
     )
     
     # Save to database
@@ -104,7 +109,7 @@ async def get_explanation(
     """Generate an AI explanation for a county's forecast."""
     # Get county + forecast data
     county = await execute_query(
-        """SELECT c.name, b.phase, b.vci3m, b.spi
+        """SELECT c.name, c.livelihood_zone, b.phase, b.vci3m, b.spi
            FROM counties c
            LEFT JOIN bulletins b ON b.county_id = c.id
                AND b.month = (SELECT MAX(month) FROM bulletins WHERE county_id = c.id)
@@ -138,6 +143,12 @@ async def get_explanation(
         confidence = forecast.get("confidence")
         priority_score = forecast.get("priority_score", 0)
     
+    # ICPAC's own regional seasonal outlook — the second signal the AI
+    # reconciles against the statistical forecast, instead of just narrating
+    # the forecast in isolation. Cached in-process; failures return None and
+    # the explanation is generated without it rather than erroring out.
+    seasonal_outlook = await fetch_seasonal_outlook()
+
     result = await generate_explanation(
         county_name=county["name"],
         current_phase=county.get("phase") or "Normal",
@@ -149,6 +160,8 @@ async def get_explanation(
         days_to_crossing=days_to_crossing,
         confidence=confidence,
         priority_score=priority_score,
+        livelihood_zone=county.get("livelihood_zone"),
+        seasonal_outlook=seasonal_outlook,
         detail_level=detail_level
     )
     
@@ -167,6 +180,8 @@ async def get_explanation(
     return {
         "county_id": county_id,
         "county_name": county["name"],
+        "livelihood_zone": county.get("livelihood_zone"),
+        "seasonal_outlook": seasonal_outlook,
         **result
     }
 
