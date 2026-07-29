@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, Clock, ShieldAlert, FileText, Info, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react';
 import PhaseBadge from '@/components/PhaseBadge';
 import ThresholdChart from '@/components/ThresholdChart';
-import { fetchCountyDetail, fetchCountyExplanation, CountyDetail } from '@/lib/api';
+import { fetchCountyDetail, fetchCountyExplanation, CountyDetail, AiExplanation } from '@/lib/api';
 
 export default function CountyDetailPage() {
   const params = useParams();
@@ -16,7 +16,7 @@ export default function CountyDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [generatingAi, setGeneratingAi] = useState(false);
-  const [aiResult, setAiResult] = useState<{ explanation: string; citations: any[] } | null>(null);
+  const [aiResult, setAiResult] = useState<Partial<AiExplanation> & { explanation: string; citations: any[] } | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -214,21 +214,30 @@ export default function CountyDetailPage() {
               )}
             </div>
 
-            {/* Livelihood Guidance Note */}
-            <div className="mt-4 p-3 bg-[#F8F9F5] border border-[#DDE0D8] rounded text-xs space-y-1 font-sans">
-              <div className="font-mono font-bold text-[#5B6560] uppercase text-[11px]">
-                Livelihood Implication ({data.livelihood_zone}):
+            {/* Regional Seasonal Outlook — the second signal the AI reconciles
+                against the statistical forecast above (livelihood-specific
+                guidance is now generated directly in the explanation itself,
+                not a separate static note). */}
+            {aiResult?.seasonal_outlook && (
+              <div className="mt-4 p-3 bg-[#F8F9F5] border border-[#DDE0D8] rounded text-xs space-y-1 font-sans">
+                <div className="font-mono font-bold text-[#5B6560] uppercase text-[11px]">
+                  ICPAC Seasonal Outlook ({aiResult.seasonal_outlook.period}):
+                </div>
+                <p className="text-[#232A2E]">{aiResult.seasonal_outlook.rainfall_outlook}</p>
+                <a
+                  href={aiResult.seasonal_outlook.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block text-[11px] text-[#B9713A] underline"
+                >
+                  Source: ICPAC Seasonal Forecast →
+                </a>
               </div>
-              <p className="text-[#232A2E]">
-                {data.livelihood_zone === 'pastoralist'
-                  ? 'Pastoralist zone: Prioritize early livestock vaccination, grazing management, and strategic water trucking before phase shift.'
-                  : 'Agro-pastoralist zone: Focus on crop residue preservation, soil moisture conservation, and local market food stock monitoring.'}
-              </p>
-            </div>
+            )}
           </div>
 
           <div className="pt-3 border-t border-[#EDEEE8] text-[11px] font-mono text-[#5B6560] flex items-center justify-between">
-            <span>Model: GPT-4o-mini + AR(2)</span>
+            <span>Model: {aiResult?.model || 'AR(2) forecast + LLM synthesis'}</span>
             <span>Citations linked to NDMA source data below</span>
           </div>
         </div>
