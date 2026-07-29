@@ -17,14 +17,22 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# NDMA phase classifications
-VALID_PHASES = {"Normal", "Alert", "Alarm", "Emergency", "Recovery"}
+# NDMA phase classifications. NDMA's actual National bulletins (confirmed
+# against the Jan 2026 and Feb 2026 editions) use six phases, not five —
+# "Pre-Alert" sits between Normal and Alert. It's a real, currently-used
+# label, not a hypothetical.
+VALID_PHASES = {"Normal", "Pre-Alert", "Alert", "Alarm", "Emergency", "Recovery"}
 
 # NDMA's VCI3M vegetation-condition bands, confirmed in current county
 # bulletins. These are a VCI proxy for forecasting; NDMA's official EW phase
 # remains the multi-indicator phase printed in each bulletin.
+# Pre-Alert has no published numeric VCI3M cutoff of its own (NDMA assigns it
+# via multi-indicator judgement, not a single VCI3M number) — 27.5 here is an
+# interpolated midpoint between Alert and Normal, used only as a fallback
+# when a bulletin's phase can't be read directly from its own text.
 VCI3M_THRESHOLDS = {
     "Normal": 35.0,      # normal / above-normal vegetation condition
+    "Pre-Alert": 27.5,   # interpolated midpoint (see note above)
     "Alert": 20.0,       # moderate vegetation deficit
     "Alarm": 10.0,       # severe vegetation deficit
     "Emergency": 0.0,    # extreme vegetation deficit
@@ -56,8 +64,13 @@ def normalize_county_name(name: str) -> str:
 
 
 def extract_phase(text: str) -> Optional[str]:
-    """Extract phase classification from text."""
-    for phase in VALID_PHASES:
+    """Extract phase classification from text.
+
+    Longest phase name first — 'Alert' is a literal substring of
+    'Pre-Alert', so checking in the wrong order would misclassify every
+    Pre-Alert bulletin as Alert.
+    """
+    for phase in sorted(VALID_PHASES, key=len, reverse=True):
         if phase.lower() in text.lower():
             return phase
     return None
@@ -339,6 +352,8 @@ def classify_from_vci3m(vci3m: float) -> str:
     """Return the NDMA VCI3M vegetation-condition proxy band."""
     if vci3m >= VCI3M_THRESHOLDS["Normal"]:
         return "Normal"
+    elif vci3m >= VCI3M_THRESHOLDS["Pre-Alert"]:
+        return "Pre-Alert"
     elif vci3m >= VCI3M_THRESHOLDS["Alert"]:
         return "Alert"
     elif vci3m >= VCI3M_THRESHOLDS["Alarm"]:
@@ -352,9 +367,10 @@ def get_phase_severity(phase: str) -> int:
     severity_map = {
         "Normal": 0,
         "Recovery": 1,
-        "Alert": 2,
-        "Alarm": 3,
-        "Emergency": 4,
+        "Pre-Alert": 2,
+        "Alert": 3,
+        "Alarm": 4,
+        "Emergency": 5,
     }
     return severity_map.get(phase, 0)
 
