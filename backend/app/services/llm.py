@@ -51,12 +51,12 @@ CRITICAL RULES:
 6. This is diagnostic writing for the model's own credibility page — treat it like a methods-section audit, not marketing copy"""
 
 
-REGIONAL_SYSTEM_PROMPT = """You are a regional drought-risk analyst reviewing Pulsecast's current priority queue across all monitored counties. Your job is to spot clustering — counties in the same region or livelihood zone trending toward the same phase at once — which a per-county view can't surface on its own.
+REGIONAL_SYSTEM_PROMPT = """You are a regional drought-risk analyst writing up cross-county clusters that Pulsecast's pattern-detection engine has already computed deterministically (see app/services/patterns.py) — you are not detecting clusters yourself, only narrating the ones you're given.
 
 CRITICAL RULES:
 1. Cite every county/phase claim using [ref:CountyName=Phase] format
-2. Only report clusters that are actually present in the data — do not infer regional causes not stated in the input
-3. If fewer than 3 counties currently show elevated phases (Alert/Alarm/Emergency), say clustering can't be assessed yet rather than forcing a pattern
+2. Only describe the clusters provided in the input — never infer a cluster that isn't in the computed_clusters list, and never infer a regional cause not stated in the input
+3. If computed_clusters is empty, say plainly that no regional cluster currently meets the detection threshold — do not manufacture one
 4. Keep it to 2 short paragraphs
 5. This informs the Disaster Response Team persona specifically — write for someone deciding whether to treat this as isolated county issues or a regional event"""
 
@@ -114,7 +114,8 @@ async def generate_explanation(
     historical_trend: Optional[str] = None,
     detail_level: str = "summary",
     livelihood_zone: Optional[str] = None,
-    seasonal_outlook: Optional[dict] = None
+    seasonal_outlook: Optional[dict] = None,
+    pattern_signals: Optional[dict] = None
 ) -> dict:
     """
     Generate a plain-language explanation of a county's forecast.
@@ -125,6 +126,9 @@ async def generate_explanation(
             livelihood-specific guidance section instead of a static frontend template
         seasonal_outlook: optional dict from app.services.seasonal_outlook.fetch_seasonal_outlook()
             — a second, independent signal the model reconciles against the statistical forecast
+        pattern_signals: optional dict from app.services.patterns — deterministically
+            detected recurrence/cluster patterns the AR(2) forecast's 2-point window can't
+            see on its own. Passed through as plain facts to state, not to re-derive.
 
     Returns:
         {explanation, citations, generated_at, model}
@@ -151,6 +155,10 @@ async def generate_explanation(
             }
             if seasonal_outlook else None
         ),
+        "detected_patterns": (
+            [s["note"] for s in pattern_signals.get("signals", [])]
+            if pattern_signals else None
+        ),
     }
 
     if detail_level == "summary":
@@ -158,7 +166,7 @@ async def generate_explanation(
 
 Data: {json.dumps(context, indent=2)}
 
-The sentence should convey: current status, what's coming, and urgency. If seasonal_outlook is present and disagrees with the statistical forecast, briefly flag that. Include [ref:] citations for key values."""
+The sentence should convey: current status, what's coming, and urgency. If seasonal_outlook is present and disagrees with the statistical forecast, briefly flag that. If detected_patterns is present, prioritize mentioning it — it's evidence the raw statistical forecast alone would miss. Include [ref:] citations for key values."""
     else:
         user_prompt = f"""Generate a detailed explanation (2-4 short paragraphs) for {county_name} county's drought forecast.
 
@@ -168,7 +176,8 @@ Structure:
 1. Current situation — what phase, what the indicators show
 2. Forecast — what's projected, when any threshold crossing might happen, confidence level
 3. If seasonal_outlook is present, reconcile it explicitly with the statistical forecast — do they agree or disagree, and what that means for how much to trust this forecast right now
-4. Livelihood-specific guidance — given this county's livelihood_zone, what a coordinator should specifically prioritize (livestock, grazing and water for pastoralist zones; crops, food stocks and soil moisture for agro-pastoralist zones; markets and settled farming for mixed zones)
+4. If detected_patterns is present, explain what it means: this is evidence (recurring years, a persistent streak, or a regional cluster) that the 2-point AR forecast above can't see on its own, and why it raises or should raise this county's priority
+5. Livelihood-specific guidance — given this county's livelihood_zone, what a coordinator should specifically prioritize (livestock, grazing and water for pastoralist zones; crops, food stocks and soil moisture for agro-pastoralist zones; markets and settled farming for mixed zones)
 
 Include [ref:] citations for every specific value mentioned, including the seasonal outlook if present."""
 
@@ -207,7 +216,8 @@ Include [ref:] citations for every specific value mentioned, including the seaso
         return generate_fallback_explanation(
             county_name, current_phase, current_vci3m, current_spi,
             crossing_date, crossing_phase, days_to_crossing, confidence,
-            priority_score, detail_level, livelihood_zone, seasonal_outlook
+            priority_score, detail_level, livelihood_zone, seasonal_outlook,
+            pattern_signals
         )
 
 
@@ -265,11 +275,30 @@ Write up what you find. Include [ref:] citations for every specific number menti
         }
 
 
-async def generate_regional_synthesis(queue_items: list[dict]) -> dict:
+async def generate_regional_synthesis(queue_items: list[dict], computed_clusters: Optional[dict] = None) -> dict:
     """
-    Cross-county pattern synthesis over the current priority queue.
-    Reasons over already-computed phase/region/livelihood data — does not forecast.
+    Narrate the regional/livelihood-zone clusters that
+    app.services.patterns.detect_regional_clusters already computed
+    deterministically. The LLM's job here is to write the clusters up
+    clearly, not to spot them itself — see REGIONAL_SYSTEM_PROMPT.
     """
+    computed_clusters = computed_clusters or {}
+
+    # Collapse the per-county cluster dict down to one entry per region
+    # for the prompt, since every county in the same cluster repeats the
+    # same region/peer info.
+    clusters_by_region: dict[str, dict] = {}
+    for county_id, info in computed_clusters.items():
+        clusters_by_region.setdefault(info["region"], {
+            "region": info["region"],
+            "at_risk_count": info["at_risk_count"],
+            "region_size": info["region_size"],
+            "counties": sorted(set(info["peer_counties"]) | {
+                item["county_name"] for item in queue_items
+                if item.get("county_id") == county_id
+            }),
+        })
+
     context = [
         {
             "county": item.get("county_name"),
@@ -281,11 +310,15 @@ async def generate_regional_synthesis(queue_items: list[dict]) -> dict:
         for item in queue_items
     ]
 
-    user_prompt = f"""Current county statuses:
+    user_prompt = f"""Deterministically computed regional clusters (the only clusters you may describe):
+
+{json.dumps(list(clusters_by_region.values()), indent=2)}
+
+Full current county statuses, for citing individual phases only:
 
 {json.dumps(context, indent=2)}
 
-Identify any regional or livelihood-zone clustering among counties in Alert, Alarm, or Emergency phase. Cite each county referenced."""
+Write up the computed clusters above for a Disaster Response Team reader. Cite each county referenced."""
 
     try:
         messages = [
@@ -302,15 +335,24 @@ Identify any regional or livelihood-zone clustering among counties in Alert, Ala
         return {
             "synthesis": analysis,
             "citations": citations,
+            "computed_clusters": list(clusters_by_region.values()),
             "generated_at": datetime.now().isoformat(),
             "model": settings.LLM_MODEL,
         }
     except Exception as e:
         logger.error(f"Regional synthesis LLM call failed: {e}")
-        elevated = [c for c in context if c["phase"] not in (None, "Normal")]
+        if clusters_by_region:
+            fallback = "; ".join(
+                f"{c['region']} ({c['at_risk_count']}/{c['region_size']} counties at risk: {', '.join(c['counties'])})"
+                for c in clusters_by_region.values()
+            )
+            synthesis = f"Regional clusters detected: {fallback}. Narrative synthesis unavailable — retry shortly."
+        else:
+            synthesis = "No regional cluster currently meets the detection threshold. Narrative synthesis unavailable — retry shortly."
         return {
-            "synthesis": f"{len(elevated)} counties currently outside Normal phase. Regional synthesis unavailable — retry shortly.",
+            "synthesis": synthesis,
             "citations": [],
+            "computed_clusters": list(clusters_by_region.values()),
             "generated_at": datetime.now().isoformat(),
             "model": "template-fallback",
         }
@@ -328,7 +370,8 @@ def generate_fallback_explanation(
     priority_score: float,
     detail_level: str = "summary",
     livelihood_zone: Optional[str] = None,
-    seasonal_outlook: Optional[dict] = None
+    seasonal_outlook: Optional[dict] = None,
+    pattern_signals: Optional[dict] = None
 ) -> dict:
     """
     Template-based fallback when the LLM API is unavailable.
@@ -346,13 +389,21 @@ def generate_fallback_explanation(
         citations.append({"field": "SPI", "value": str(current_spi)})
 
     if detail_level == "summary":
+        pattern_suffix = ""
+        if pattern_signals and pattern_signals.get("signals"):
+            first_signal = pattern_signals["signals"][0]
+            if first_signal["type"] == "regional_cluster":
+                pattern_suffix = f" Part of a {first_signal['region']} regional cluster."
+            else:
+                pattern_suffix = " Matches a recurring/persistent pattern."
+
         if crossing_date and days_to_crossing:
             conf_pct = f"{confidence*100:.0f}" if confidence else "N/A"
             parts.append(
                 f"{county_name} is currently in [ref:phase={current_phase}] phase "
                 f"with VCI3M at {vci_str}, projected to cross into "
                 f"[ref:crossing_phase={crossing_phase}] around [ref:crossing={crossing_date}] "
-                f"({days_to_crossing} days) at [ref:confidence={conf_pct}%] confidence."
+                f"({days_to_crossing} days) at [ref:confidence={conf_pct}%] confidence.{pattern_suffix}"
             )
             citations.extend([
                 {"field": "phase", "value": current_phase},
@@ -364,7 +415,7 @@ def generate_fallback_explanation(
             parts.append(
                 f"{county_name} is in [ref:phase={current_phase}] phase "
                 f"with VCI3M at {vci_str}. No threshold crossing projected "
-                f"within the forecast window."
+                f"within the forecast window.{pattern_suffix}"
             )
             citations.append({"field": "phase", "value": current_phase})
     else:
@@ -420,6 +471,14 @@ def generate_fallback_explanation(
                 f"signal against the county-level forecast above before treating it as confirmed."
             )
             citations.append({"field": "seasonal_outlook", "value": period})
+
+        if pattern_signals and pattern_signals.get("signals"):
+            pattern_text = " ".join(s["note"] for s in pattern_signals["signals"])
+            parts.append(
+                f"\n\n**Detected Pattern:** {pattern_text} This is evidence a 2-point "
+                f"statistical trend line can't see on its own, and is already reflected in "
+                f"this county's priority score above."
+            )
 
         if livelihood_zone:
             zone_note = {
