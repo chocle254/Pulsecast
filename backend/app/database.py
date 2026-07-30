@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS forecasts (
     confidence REAL,
     priority_score REAL,
     ai_explanation TEXT,
+    pattern_signals TEXT,                -- JSON: cross-county/temporal pattern detections (see patterns.py)
     FOREIGN KEY (county_id) REFERENCES counties(id)
 );
 
@@ -73,9 +74,25 @@ async def init_db():
     db = await get_db()
     try:
         await db.executescript(SCHEMA)
+        await _migrate_schema(db)
         await db.commit()
     finally:
         await db.close()
+
+
+async def _migrate_schema(db: aiosqlite.Connection) -> None:
+    """Add columns introduced after a DB file was first created.
+
+    `CREATE TABLE IF NOT EXISTS` in SCHEMA only applies to brand-new
+    databases — existing SQLite files on disk (e.g. a prior deployment's
+    volume) keep whatever columns they had at creation time. This adds any
+    columns that are missing without touching existing data.
+    """
+    cursor = await db.execute("PRAGMA table_info(forecasts)")
+    existing_columns = {row["name"] for row in await cursor.fetchall()}
+
+    if "pattern_signals" not in existing_columns:
+        await db.execute("ALTER TABLE forecasts ADD COLUMN pattern_signals TEXT")
 
 
 async def execute_query(query: str, params: tuple = (), fetchone: bool = False):
