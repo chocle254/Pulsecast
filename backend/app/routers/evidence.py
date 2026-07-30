@@ -28,7 +28,8 @@ async def get_evidence_trail(
     query = """
         SELECT b.id, b.county_id, c.name as county_name,
                b.month, b.vci3m, b.spi, b.phase,
-               b.source_url, b.source_page, b.parsed_at
+               b.source_url, b.source_page, b.parsed_at,
+               b.parsing_method, b.ai_evidence
         FROM bulletins b
         JOIN counties c ON c.id = b.county_id
     """
@@ -82,6 +83,10 @@ async def get_evidence_stats():
         "SELECT phase, COUNT(*) as count FROM bulletins GROUP BY phase ORDER BY count DESC"
     )
 
+    parsing_method_dist = await execute_query(
+        "SELECT parsing_method, COUNT(*) as count FROM bulletins GROUP BY parsing_method"
+    )
+
     last_updated = await execute_query(
         "SELECT MAX(parsed_at) as ts FROM bulletins", fetchone=True
     )
@@ -91,5 +96,6 @@ async def get_evidence_stats():
         "months_covered": months["count"] if months else 0,
         "counties_covered": counties["count"] if counties else 0,
         "phase_distribution": phase_dist,
+        "parsing_method_distribution": parsing_method_dist,
         "last_updated": last_updated["ts"] if last_updated else None,
     }
