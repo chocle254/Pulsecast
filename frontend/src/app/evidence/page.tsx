@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Database, FileText, Download, ExternalLink, Filter } from 'lucide-react';
 import PhaseBadge from '@/components/PhaseBadge';
+import ParsingMethodBadge from '@/components/ParsingMethodBadge';
 import { fetchEvidenceTrail, EvidenceRecord } from '@/lib/api';
 
 export default function EvidenceTrailPage() {
@@ -36,7 +37,7 @@ export default function EvidenceTrailPage() {
   }, [selectedPhase, selectedMonth]);
 
   const exportCsv = () => {
-    const headers = ['County', 'Month', 'Phase', 'VCI3M', 'SPI', 'Source Page', 'Parsed At'];
+    const headers = ['County', 'Month', 'Phase', 'VCI3M', 'SPI', 'Source Page', 'Parsed At', 'Parsing Method'];
     const rows = records.map((r) => [
       r.county_name,
       r.month,
@@ -45,6 +46,7 @@ export default function EvidenceTrailPage() {
       r.spi ?? '',
       r.source_page ?? '',
       r.parsed_at,
+      r.parsing_method,
     ]);
 
     const csvContent =
@@ -132,6 +134,7 @@ export default function EvidenceTrailPage() {
                   <th className="py-3 px-4">VCI3M</th>
                   <th className="py-3 px-4">SPI</th>
                   <th className="py-3 px-4">Source Page</th>
+                  <th className="py-3 px-4">Parsing</th>
                   <th className="py-3 px-4">Actions</th>
                 </tr>
               </thead>
@@ -154,6 +157,9 @@ export default function EvidenceTrailPage() {
                       <span className="inline-flex items-center gap-1 bg-[#EDEEE8] px-2 py-0.5 rounded text-[11px]">
                         <FileText className="w-3 h-3" /> Page {r.source_page || 1}
                       </span>
+                    </td>
+                    <td className="py-2.5 px-4">
+                      <ParsingMethodBadge parsingMethod={r.parsing_method} aiEvidence={r.ai_evidence} size="sm" />
                     </td>
                     <td className="py-2.5 px-4">
                       <Link
