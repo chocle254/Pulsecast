@@ -16,8 +16,64 @@ from app.services.forecast import generate_county_forecast
 from app.services.historical_seed import expand_historical_records
 from app.services.ingestion import ALL_COUNTIES, ingest_all_bulletins
 from app.services.parser import parse_county_bulletin
+from app.services.patterns import (
+    combine_pattern_signals,
+    detect_recurrence_pattern,
+    detect_regional_clusters,
+)
 
 logger = logging.getLogger(__name__)
+
+
+async def build_pattern_signals(db) -> dict:
+    """
+    Compute cross-county/temporal pattern signals for every county in one
+    pass (see app/services/patterns.py). Shared by both the batch
+    regeneration path below and the single-county /regenerate endpoint,
+    so a manual regenerate sees the same signals a full reseed would.
+
+    Returns {county_id: pattern_signals_dict} — only for counties where
+    at least one detector fired.
+    """
+    cursor = await db.execute("SELECT id, name, region FROM counties")
+    counties = [dict(row) for row in await cursor.fetchall()]
+
+    cursor = await db.execute(
+        """SELECT county_id, month, phase FROM bulletins
+           WHERE phase IS NOT NULL ORDER BY county_id, month ASC"""
+    )
+    all_bulletins = [dict(row) for row in await cursor.fetchall()]
+
+    history_by_county: dict[int, list[dict]] = {}
+    for row in all_bulletins:
+        history_by_county.setdefault(row["county_id"], []).append(
+            {"month": row["month"], "phase": row["phase"]}
+        )
+
+    # Regional clustering runs once over every county's latest bulletin.
+    latest_by_county = []
+    for county in counties:
+        history = history_by_county.get(county["id"])
+        if not history:
+            continue
+        latest_by_county.append({
+            "county_id": county["id"],
+            "county_name": county["name"],
+            "region": county["region"],
+            "phase": history[-1]["phase"],
+        })
+    clusters = detect_regional_clusters(latest_by_county)
+
+    signals: dict[int, dict] = {}
+    for county in counties:
+        history = history_by_county.get(county["id"])
+        recurrence = detect_recurrence_pattern(county["name"], history) if history else None
+        cluster = clusters.get(county["id"])
+        combined = combine_pattern_signals(recurrence, cluster)
+        if combined:
+            signals[county["id"]] = combined
+
+    return signals
 
 
 async def seed_database() -> None:
@@ -176,6 +232,11 @@ async def _regenerate_forecasts(db) -> None:
     # a per-county figure. See app/services/calibration.py.
     calibration = await compute_confidence_calibration()
 
+    # Cross-county/temporal pattern signals (recurrence + regional
+    # clusters) — also computed once per run over every county's full
+    # bulletin history. See app/services/patterns.py.
+    pattern_signals_by_county = await build_pattern_signals(db)
+
     for county_id in county_ids:
         cursor = await db.execute(
             """SELECT vci3m, phase FROM bulletins
@@ -193,13 +254,14 @@ async def _regenerate_forecasts(db) -> None:
             historical_vci3m=vci3m_series,
             current_phase=rows[-1]["phase"],
             calibration=calibration,
+            pattern_signals=pattern_signals_by_county.get(county_id),
         )
         await db.execute(
             """INSERT INTO forecasts
                (county_id, generated_at, forecast_weeks, forecast_values,
                 crossing_date, crossing_phase, days_to_crossing,
-                confidence, priority_score)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                confidence, priority_score, pattern_signals)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 county_id,
                 forecast["generated_at"],
@@ -210,6 +272,7 @@ async def _regenerate_forecasts(db) -> None:
                 forecast.get("days_to_crossing"),
                 forecast.get("confidence"),
                 forecast.get("priority_score"),
+                json.dumps(forecast["pattern_signals"]) if forecast.get("pattern_signals") else None,
             ),
         )
 
