@@ -297,6 +297,67 @@ def parse_county_bulletin(
     }
 
 
+def _extract_page_one_text(pdf_path: str) -> Optional[str]:
+    """Read raw page-1 text only — used to hand a failed bulletin to the AI
+    parsing fallback without re-deriving anything from it ourselves."""
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            return pdf.pages[0].extract_text() or ""
+    except Exception as exc:
+        logger.error("Could not read page text from %s: %s", pdf_path, exc)
+        return None
+
+
+async def parse_county_bulletin_with_ai_fallback(
+    pdf_path: str,
+    county_name: str,
+    bulletin_month: str,
+) -> Optional[dict]:
+    """
+    Try the deterministic regex/table parser first; only reach for the AI
+    fallback when that finds no phase at all — for example a county whose
+    bulletin template this quarter doesn't match any of the known patterns.
+
+    The AI never sees a bulletin the regex parser already succeeded on, and
+    its output is discarded unless it grounds every claim in a verbatim quote
+    from the page (see llm.extract_bulletin_fields_ai). Returns a record
+    tagged with parsing_method so the evidence trail always shows which path
+    produced it — this is a recovery path for parser drift, not a silent
+    replacement for the deterministic parser.
+    """
+    record = parse_county_bulletin(pdf_path, county_name, bulletin_month)
+    if record:
+        record["parsing_method"] = "regex"
+        record["ai_evidence"] = None
+        return record
+
+    page_text = _extract_page_one_text(pdf_path)
+    if not page_text:
+        return None
+
+    from app.services.llm import extract_bulletin_fields_ai
+
+    ai_result = await extract_bulletin_fields_ai(county_name, page_text)
+    if not ai_result:
+        logger.warning(
+            "Regex parser and AI fallback both failed to find a phase in %s; skipping it",
+            pdf_path,
+        )
+        return None
+
+    logger.info("AI parsing fallback recovered a phase for %s (%s)", county_name, bulletin_month)
+    return {
+        "county_name": normalize_county_name(county_name),
+        "month": bulletin_month,
+        "phase": ai_result["phase"],
+        "vci3m": ai_result["vci3m"],
+        "spi": ai_result["spi"],
+        "source_page": 1,
+        "parsing_method": "ai_fallback",
+        "ai_evidence": ai_result["evidence"],
+    }
+
+
 def _extract_vci3m_from_summary_table(page) -> Optional[float]:
     """Read VCI3M from a first-page NDMA summary table when available."""
     try:
