@@ -154,9 +154,21 @@ export default function EvidenceTrailPage() {
                     <td className="py-2.5 px-4 font-bold text-[#232A2E]">{r.vci3m ?? '—'}</td>
                     <td className="py-2.5 px-4 text-[#5B6560]">{r.spi ?? '—'}</td>
                     <td className="py-2.5 px-4 text-[#5B6560]">
-                      <span className="inline-flex items-center gap-1 bg-[#EDEEE8] px-2 py-0.5 rounded text-[11px]">
-                        <FileText className="w-3 h-3" /> Page {r.source_page || 1}
-                      </span>
+                      {r.source_url ? (
+                        <a
+                          href={r.source_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 bg-[#EDEEE8] px-2 py-0.5 rounded text-[11px] hover:bg-[#E2E4DC]"
+                        >
+                          <FileText className="w-3 h-3" />
+                          {r.source_page ? `Page ${r.source_page}` : 'View source'}
+                        </a>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 bg-[#EDEEE8] px-2 py-0.5 rounded text-[11px] text-[#9AA39C]">
+                          Source unavailable
+                        </span>
+                      )}
                     </td>
                     <td className="py-2.5 px-4">
                       <ParsingMethodBadge parsingMethod={r.parsing_method} aiEvidence={r.ai_evidence} size="sm" />
