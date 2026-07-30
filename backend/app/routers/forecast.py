@@ -14,6 +14,7 @@ from app.services.forecast import generate_county_forecast
 from app.services.llm import generate_explanation, generate_backtest_analysis
 from app.services.calibration import compute_confidence_calibration
 from app.services.seasonal_outlook import fetch_seasonal_outlook
+from app.services.seeder import build_pattern_signals
 
 router = APIRouter(prefix="/api/forecast", tags=["forecast"])
 
@@ -48,6 +49,7 @@ async def get_forecast(county_id: int):
         confidence=forecast.get("confidence"),
         priority_score=forecast.get("priority_score"),
         ai_explanation=forecast.get("ai_explanation"),
+        pattern_signals=json.loads(forecast["pattern_signals"]) if forecast.get("pattern_signals") else None,
     )
 
 
@@ -70,29 +72,32 @@ async def regenerate_forecast(county_id: int):
 
     calibration = await compute_confidence_calibration()
 
-    forecast = generate_county_forecast(
-        county_id=county_id,
-        historical_vci3m=vci3m_series,
-        current_phase=current_phase,
-        calibration=calibration
-    )
-
-    # Save to database
     db = await get_db()
     try:
+        pattern_signals = (await build_pattern_signals(db)).get(county_id)
+
+        forecast = generate_county_forecast(
+            county_id=county_id,
+            historical_vci3m=vci3m_series,
+            current_phase=current_phase,
+            calibration=calibration,
+            pattern_signals=pattern_signals,
+        )
+
         await db.execute(
             """INSERT INTO forecasts 
                (county_id, generated_at, forecast_weeks, forecast_values,
                 crossing_date, crossing_phase, days_to_crossing,
-                confidence, priority_score)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                confidence, priority_score, pattern_signals)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (county_id, forecast["generated_at"], forecast["forecast_weeks"],
              json.dumps(forecast["forecast_values"]),
              forecast.get("crossing_date"),
              forecast.get("crossing_phase"),
              forecast.get("days_to_crossing"),
              forecast.get("confidence"),
-             forecast.get("priority_score"))
+             forecast.get("priority_score"),
+             json.dumps(forecast["pattern_signals"]) if forecast.get("pattern_signals") else None)
         )
         await db.commit()
     finally:
@@ -134,6 +139,7 @@ async def get_explanation(
     days_to_crossing = None
     confidence = None
     priority_score = 0
+    pattern_signals = None
 
     if forecast:
         forecast_values = json.loads(forecast["forecast_values"]) if forecast["forecast_values"] else []
@@ -142,6 +148,8 @@ async def get_explanation(
         days_to_crossing = forecast.get("days_to_crossing")
         confidence = forecast.get("confidence")
         priority_score = forecast.get("priority_score", 0)
+        if forecast.get("pattern_signals"):
+            pattern_signals = json.loads(forecast["pattern_signals"])
 
     # ICPAC's own regional seasonal outlook — the second signal the AI
     # reconciles against the statistical forecast, instead of just narrating
@@ -162,7 +170,8 @@ async def get_explanation(
         priority_score=priority_score,
         livelihood_zone=county.get("livelihood_zone"),
         seasonal_outlook=seasonal_outlook,
-        detail_level=detail_level
+        detail_level=detail_level,
+        pattern_signals=pattern_signals
     )
 
     # Cache the explanation
@@ -182,6 +191,7 @@ async def get_explanation(
         "county_name": county["name"],
         "livelihood_zone": county.get("livelihood_zone"),
         "seasonal_outlook": seasonal_outlook,
+        "pattern_signals": pattern_signals,
         **result
     }
 
