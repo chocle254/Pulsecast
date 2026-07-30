@@ -4,6 +4,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { Filter, ArrowUpDown, Clock, ArrowRight, Search, ShieldAlert, Flame, TriangleAlert, TimerReset } from 'lucide-react';
 import PhaseBadge from '@/components/PhaseBadge';
+import PatternBadge from '@/components/PatternBadge';
 import Sparkline from '@/components/Sparkline';
 import KenyaMap from '@/components/KenyaMap';
 import CountUp from '@/components/CountUp';
@@ -271,6 +272,7 @@ export default function PriorityQueuePage() {
                               <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
                             </span>
                             <PhaseBadge phase={item.current_phase} size="sm" />
+                            <PatternBadge signals={item.pattern_signals} size="sm" />
                             {isTopUrgent && (
                               <span className="live-pulse" title="Top urgency" />
                             )}
@@ -338,6 +340,20 @@ export default function PriorityQueuePage() {
                         </span>
                       </div>
                     </div>
+
+                    {item.pattern_signals && item.pattern_signals.signals.length > 0 && (
+                      <div className="mt-3 pt-2.5 border-t border-[var(--border-subtle)] text-xs text-[var(--ink-muted)] font-sans flex items-start gap-2">
+                        <span
+                          className="font-mono text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase shrink-0 mt-0.5"
+                          style={{ color: 'var(--accent)', background: 'var(--accent-bg)' }}
+                        >
+                          Pattern
+                        </span>
+                        <p className="line-clamp-2 leading-relaxed">
+                          {item.pattern_signals.signals.map((s) => s.note).join(' ')}
+                        </p>
+                      </div>
+                    )}
 
                     {item.ai_summary && (
                       <div className="mt-3 pt-2.5 border-t border-[var(--border-subtle)] text-xs text-[var(--ink-muted)] font-sans flex items-start gap-2">
