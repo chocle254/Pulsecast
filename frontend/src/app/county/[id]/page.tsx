@@ -287,9 +287,19 @@ export default function CountyDetailPage() {
                   <td className="py-2.5 px-3 font-semibold text-[#232A2E]">{h.vci3m ?? '—'}</td>
                   <td className="py-2.5 px-3 text-[#5B6560]">{h.spi ?? '—'}</td>
                   <td className="py-2.5 px-3 text-[#5B6560]">
-                    <span className="inline-flex items-center gap-1 text-[11px] underline cursor-pointer hover:text-[#232A2E]">
-                      <FileText className="w-3 h-3" /> NDMA Bulletin p.{h.source_page || 1}
-                    </span>
+                    {h.source_url ? (
+                      <a
+                        href={h.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] underline hover:text-[#232A2E]"
+                      >
+                        <FileText className="w-3 h-3" />
+                        {h.source_page ? `NDMA Bulletin p.${h.source_page}` : 'View source'}
+                      </a>
+                    ) : (
+                      <span className="text-[11px] text-[#9AA39C]">Source unavailable</span>
+                    )}
                   </td>
                 </tr>
               ))}
