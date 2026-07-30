@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Optional
 import httpx
 from app.config import settings
+from app.services.parser import VALID_PHASES
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,16 @@ CRITICAL RULES:
 5. This informs the Disaster Response Team persona specifically — write for someone deciding whether to treat this as isolated county issues or a regional event"""
 
 
+PARSING_FALLBACK_SYSTEM_PROMPT = """You are a strict data-extraction assistant reading one page of an official NDMA county drought bulletin whose layout the regex/table parser could not handle. You are recovering a parsing failure, not writing analysis.
+
+CRITICAL RULES:
+1. Extract ONLY values that are explicitly present in the text. Never estimate, infer, or compute a value that isn't stated.
+2. "phase" must be exactly one of: Normal, Pre-Alert, Alert, Alarm, Emergency, Recovery — copied from the text, never guessed from vegetation description alone.
+3. "evidence" must be a short VERBATIM quote (under 25 words, copied exactly, no paraphrasing) taken directly from the text that states the phase. This is checked programmatically against the source text — if it isn't an exact substring, the whole extraction is discarded.
+4. If the phase cannot be found stated explicitly in the text, set "phase" to null rather than guessing. Do not extract vci3m or spi from a document where phase is null.
+5. Respond with ONLY a single JSON object, no markdown fences, no commentary: {"phase": string|null, "vci3m": number|null, "spi": number|null, "evidence": string|null}"""
+
+
 async def call_groq_api(messages: list[dict], max_tokens: int = 500) -> str:
     """
     Call the Groq API (OpenAI-compatible) for LLM inference.
@@ -98,6 +109,84 @@ async def call_groq_api(messages: list[dict], max_tokens: int = 500) -> str:
         response.raise_for_status()
         data = response.json()
         return data["choices"][0]["message"]["content"]
+
+
+def _quote_is_grounded(quote: Optional[str], source_text: str) -> bool:
+    """Reject an AI extraction whose 'evidence' isn't an actual substring of
+    the source page. Whitespace is collapsed before comparing since PDF text
+    extraction often turns single spaces/newlines into runs of whitespace."""
+    if not quote:
+        return False
+    normalize = lambda s: re.sub(r"\s+", " ", s).strip().lower()
+    return normalize(quote) in normalize(source_text)
+
+
+async def extract_bulletin_fields_ai(county_name: str, page_text: str) -> Optional[dict]:
+    """
+    AI fallback for when parser.py's regex/table extraction finds no phase.
+
+    NDMA's bulletin layout drifts often enough (different county templates,
+    an occasional reformat) that a pure-regex parser silently skips a bulletin
+    it can't match rather than guessing. This recovers those cases by having
+    the model read the same page text a human would and report what it sees —
+    but only ever what it sees: every extraction must point to an exact
+    verbatim quote from the source page, checked programmatically in
+    `_quote_is_grounded` below, or the whole result is discarded. This keeps
+    the fallback from ever inventing a phase the regex parser simply missed.
+
+    Returns None if the API call fails, the response isn't valid JSON, no
+    phase was found, or the cited evidence doesn't actually appear in the text
+    — in every case the caller should treat this exactly like a regex miss.
+    """
+    # Keep the prompt focused on the summary section where NDMA states the
+    # official phase; later pages are charts/appendices that just add noise.
+    trimmed_text = page_text[:4000]
+
+    user_prompt = f"""County: {county_name}
+
+Bulletin page text:
+\"\"\"
+{trimmed_text}
+\"\"\"
+
+Extract the phase, VCI3M, and SPI as instructed. Respond with the JSON object only."""
+
+    try:
+        messages = [
+            {"role": "system", "content": PARSING_FALLBACK_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+        raw = await call_groq_api(messages, max_tokens=200)
+
+        # Some models wrap JSON in ```json fences despite instructions not to.
+        cleaned = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+        parsed = json.loads(cleaned)
+
+        phase = parsed.get("phase")
+        evidence = parsed.get("evidence")
+
+        if not phase or phase not in VALID_PHASES:
+            logger.info("AI parsing fallback for %s found no valid phase", county_name)
+            return None
+
+        if not _quote_is_grounded(evidence, page_text):
+            logger.warning(
+                "AI parsing fallback for %s cited evidence not found verbatim in the "
+                "source text — discarding the extraction rather than trusting it",
+                county_name,
+            )
+            return None
+
+        vci3m = parsed.get("vci3m")
+        spi = parsed.get("spi")
+        vci3m = float(vci3m) if isinstance(vci3m, (int, float)) and 0 <= vci3m <= 100 else None
+        spi = float(spi) if isinstance(spi, (int, float)) and -4 <= spi <= 4 else None
+
+        return {"phase": phase, "vci3m": vci3m, "spi": spi, "evidence": evidence}
+
+    except Exception as e:
+        logger.error("AI parsing fallback failed for %s: %s", county_name, e)
+        return None
 
 
 async def generate_explanation(
