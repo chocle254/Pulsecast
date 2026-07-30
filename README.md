@@ -10,6 +10,32 @@ Pulsecast takes NDMA's own published data, phases, and thresholds and projects t
 
 ---
 
+## Data & Technology Disclosure
+
+Per the hackathon rules, every external data source, API, and tool used is listed here.
+
+**Data sources**
+- NDMA County Drought Early Warning Bulletins (live) — scraped from NDMA KnowledgeWeb's public bulletin listing; every value in the app traces back to one of these PDFs (see the Evidence Trail page).
+- NDMA historical phase data (2022–2026) — NDMA's own bulletin archive sits behind a JavaScript-driven filter grid this scraper can't crawl live, so this range was compiled by hand from publicly available past bulletins found via search, not synthetically generated. It only fills gaps a live scrape can't reach, and never overwrites a live-parsed record for the same county/month.
+- ICPAC seasonal rainfall outlook — a second, independent signal the AI reconciles against the statistical forecast rather than treating either as automatically correct.
+
+**AI / APIs**
+- Groq API (Llama-family chat completions) — powers the AI translation, backtest audit, regional synthesis, and PDF-parsing-fallback layers.
+- NVIDIA NIM — fallback LLM provider if Groq is unavailable.
+
+**Backend**
+- FastAPI, Uvicorn, pdfplumber (PDF parsing), httpx, BeautifulSoup4 (scraping), aiosqlite/SQLite, statsmodels/numpy/scipy/pandas (AR(2) forecasting model), Pydantic.
+
+**Frontend**
+- Next.js, React, D3 + topojson-client (choropleth map), Tailwind CSS, Framer Motion, lucide-react.
+
+**Hosting**
+- Backend on Railway, frontend on Vercel.
+
+All of the above are open-source libraries or publicly documented commercial APIs, used within their published terms.
+
+---
+
 ## Features — what and why
 
 ### Data ingestion
