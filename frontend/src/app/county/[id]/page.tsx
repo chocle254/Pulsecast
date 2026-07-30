@@ -1,211 +1,301 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Map, ArrowRight, ShieldAlert, Users } from 'lucide-react';
-import KenyaMap from '@/components/KenyaMap';
+import { ArrowLeft, Clock, ShieldAlert, FileText, Info, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react';
 import PhaseBadge from '@/components/PhaseBadge';
-import { formatInlineText } from '@/components/FormattedText';
-import {
-  fetchMapData, fetchCountyDetail, fetchRegionalSynthesis,
-  MapCountyData, CountyDetail, RegionalSynthesis,
-} from '@/lib/api';
+import PatternBadge from '@/components/PatternBadge';
+import ThresholdChart from '@/components/ThresholdChart';
+import FormattedText from '@/components/FormattedText';
+import { fetchCountyDetail, fetchCountyExplanation, CountyDetail, AiExplanation } from '@/lib/api';
 
-export default function RegionalMapPage() {
-  const [mapCounties, setMapCounties] = useState<MapCountyData[]>([]);
-  const [selectedCounty, setSelectedCounty] = useState<CountyDetail | null>(null);
-  const [loadingMap, setLoadingMap] = useState(true);
-  const [loadingDetail, setLoadingDetail] = useState(false);
-  const [synthesis, setSynthesis] = useState<RegionalSynthesis | null>(null);
-  const [loadingSynthesis, setLoadingSynthesis] = useState(true);
+export default function CountyDetailPage() {
+  const params = useParams();
+  const countyId = Number(params?.id);
 
-  useEffect(() => {
-    fetchRegionalSynthesis()
-      .then(setSynthesis)
-      .catch((err) => console.error('Failed to load regional synthesis', err))
-      .finally(() => setLoadingSynthesis(false));
-  }, []);
+  const [data, setData] = useState<CountyDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [generatingAi, setGeneratingAi] = useState(false);
+  const [aiResult, setAiResult] = useState<Partial<AiExplanation> & { explanation: string; citations: any[] } | null>(null);
 
   useEffect(() => {
-    async function loadMap() {
-      setLoadingMap(true);
+    async function load() {
+      if (!countyId) return;
+      setLoading(true);
+      setError(null);
       try {
-        const data = await fetchMapData();
-        setMapCounties(data);
-        // Default select top urgent county if available
-        if (data.length > 0) {
-          const sorted = [...data].sort((a, b) => (b.priority_score || 0) - (a.priority_score || 0));
-          loadCountyDetail(sorted[0].county_id);
+        const detail = await fetchCountyDetail(countyId);
+        setData(detail);
+
+        // Fetch or use existing AI explanation
+        if (detail.ai_explanation) {
+          setAiResult({ explanation: detail.ai_explanation, citations: [] });
+        } else {
+          const ai = await fetchCountyExplanation(countyId, 'full');
+          setAiResult(ai);
         }
-      } catch (err) {
-        console.error('Failed to load map data', err);
+      } catch (err: any) {
+        setError(err.message || 'Failed to load county detail');
       } finally {
-        setLoadingMap(false);
+        setLoading(false);
       }
     }
-    loadMap();
-  }, []);
+    load();
+  }, [countyId]);
 
-  const loadCountyDetail = async (id: number) => {
-    setLoadingDetail(true);
+  const handleRegenerateAi = async () => {
+    if (!countyId) return;
+    setGeneratingAi(true);
     try {
-      const detail = await fetchCountyDetail(id);
-      setSelectedCounty(detail);
+      const ai = await fetchCountyExplanation(countyId, 'full');
+      setAiResult(ai);
     } catch (err) {
-      console.error(`Failed to load detail for county ${id}`, err);
+      console.error('Failed to regenerate AI explanation', err);
     } finally {
-      setLoadingDetail(false);
+      setGeneratingAi(false);
     }
   };
 
+  if (loading) {
+    return (
+      <div className="container pt-12 text-center font-mono text-[#5B6560]">
+        Loading county forecast detail...
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="container pt-12">
+        <div className="card bg-red-50 border-red-200 text-red-800 font-mono text-sm p-6">
+          {error || 'County not found'}
+        </div>
+        <Link href="/" className="inline-flex items-center gap-2 mt-4 text-xs font-mono font-bold text-[#232A2E]">
+          <ArrowLeft className="w-4 h-4" /> Back to Priority Queue
+        </Link>
+      </div>
+    );
+  }
+
+  const { forecast } = data;
+
+  // Format AI text to render cited numbers as interactive badges
+  const renderFormattedExplanation = (text: string) => <FormattedText text={text} className="space-y-0" />;
+
   return (
     <div className="container pt-6 space-y-6">
-      {/* Header Banner */}
-      <div className="bg-[#F6F6F2] border border-[#C8CCC0] rounded-lg p-5 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-mono text-[#5B6560] uppercase tracking-wider mb-1">
-            <Map className="w-3.5 h-3.5 text-[#232A2E]" />
-            <span>Spatial Cluster Analysis</span>
+      {/* Top Navigation & Header */}
+      <div>
+        <Link href="/" className="inline-flex items-center gap-1.5 text-xs font-mono font-semibold text-[#5B6560] hover:text-[#232A2E] mb-3">
+          <ArrowLeft className="w-3.5 h-3.5" /> Back to Priority Queue
+        </Link>
+
+        <div className="card p-6 bg-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-bold text-[#232A2E]">{data.name} County</h1>
+              <PhaseBadge phase={data.current_phase} size="lg" />
+              <PatternBadge signals={data.pattern_signals} size="md" />
+            </div>
+
+            <div className="flex items-center gap-3 text-xs font-mono text-[#5B6560] mt-1.5">
+              <span>Region: {data.region}</span>
+              <span>•</span>
+              <span className="capitalize">Livelihood: {data.livelihood_zone}</span>
+            </div>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#232A2E]">
-            Regional Drought Phase Map
-          </h1>
-          <p className="text-sm text-[#5B6560] mt-0.5">
-            Identify multi-county drought clusters drifting toward crisis simultaneously across Kenya.
-          </p>
+
+          {/* Quick Metrics */}
+          <div className="flex items-center gap-6 bg-[#F8F9F5] border border-[#DDE0D8] p-3 rounded-md font-mono">
+            <div className="text-center px-2">
+              <div className="text-xs text-[#5B6560]">Current VCI3M</div>
+              <div className="text-xl font-bold text-[#232A2E]">{data.current_vci3m ?? 'N/A'}</div>
+            </div>
+            <div className="h-8 w-px bg-[#DDE0D8]" />
+            <div className="text-center px-2">
+              <div className="text-xs text-[#5B6560]">Current SPI</div>
+              <div className="text-xl font-bold text-[#232A2E]">{data.current_spi ?? 'N/A'}</div>
+            </div>
+            <div className="h-8 w-px bg-[#DDE0D8]" />
+            <div className="text-center px-2">
+              <div className="text-xs text-[#5B6560]">Priority Score</div>
+              <div className="text-xl font-bold text-[#B9713A]">
+                {forecast?.priority_score?.toFixed(1) ?? 'N/A'}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Main Map + Selected County Panel Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Map View */}
-        <div className="lg:col-span-8">
-          {loadingMap ? (
-            <div className="card p-16 text-center font-mono text-xs text-[#5B6560]">
-              Loading Kenya regional GIS map...
+      {/* Threshold Crossing Warning Banner (if projected) */}
+      {forecast?.crossing_date && forecast.days_to_crossing && (
+        <div className="bg-[#FAECEB] border border-[#C46760] text-[#6D221D] p-4 rounded-md flex items-center justify-between font-mono text-xs">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-[#9B3B34] shrink-0" />
+            <div>
+              <span className="font-bold uppercase tracking-wider">Threshold Crossing Alert:</span> Projected to enter{' '}
+              <span className="font-extrabold">{forecast.crossing_phase}</span> phase on{' '}
+              <span className="font-bold">{forecast.crossing_date}</span> ({forecast.days_to_crossing} days away).
             </div>
-          ) : (
-            <KenyaMap
-              counties={mapCounties}
-              onSelectCounty={(id) => loadCountyDetail(id)}
-            />
-          )}
+          </div>
+          <div className="bg-white/80 px-2.5 py-1 rounded border border-[#C46760] font-bold">
+            Confidence: {forecast.confidence ? `${Math.round(forecast.confidence * 100)}%` : 'N/A'}
+          </div>
+        </div>
+      )}
+
+      {/* Two-Pane Main Layout: Left Chart / Right AI Translation */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Pane: Full D3 Threshold Signature Chart */}
+        <div className="lg:col-span-7 card p-5 bg-white space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-[#EDEEE8]">
+            <div>
+              <h2 className="text-base font-bold text-[#232A2E]">VCI3M Forecast & Threshold Line</h2>
+              <p className="text-xs text-[#5B6560] font-mono">
+                Solid = historical bulletin values · Dashed = 6-week projection with 90% confidence band
+              </p>
+            </div>
+          </div>
+
+          <ThresholdChart
+            historical={data.historical}
+            forecast={forecast?.forecast_values || []}
+            crossingDate={forecast?.crossing_date}
+            crossingPhase={forecast?.crossing_phase}
+            daysToCrossing={forecast?.days_to_crossing}
+            height={360}
+          />
         </div>
 
-        {/* Right Side Detail Panel */}
-        <div className="lg:col-span-4 card p-5 bg-white space-y-4 sticky top-20">
-          {loadingDetail ? (
-            <div className="p-8 text-center font-mono text-xs text-[#5B6560]">
-              Loading county inspection...
-            </div>
-          ) : selectedCounty ? (
-            <div className="space-y-4">
-              <div className="pb-3 border-b border-[#EDEEE8] flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-bold text-[#232A2E]">{selectedCounty.name}</h3>
-                  <div className="text-xs font-mono text-[#5B6560]">
-                    {selectedCounty.region} • {selectedCounty.livelihood_zone}
-                  </div>
-                </div>
-                <PhaseBadge phase={selectedCounty.current_phase} size="md" />
+        {/* Right Pane: AI Translation & Grounded Explanation */}
+        <div className="lg:col-span-5 card p-5 bg-white space-y-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-2 border-b border-[#EDEEE8] mb-3">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-[#B9713A]" />
+                <h2 className="text-base font-bold text-[#232A2E]">Grounded AI Translation</h2>
               </div>
-
-              {/* Stats */}
-              <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                <div className="bg-[#F8F9F5] p-2.5 rounded border border-[#DDE0D8]">
-                  <div className="text-[#5B6560]">Current VCI3M</div>
-                  <div className="text-lg font-bold text-[#232A2E]">
-                    {selectedCounty.current_vci3m ?? 'N/A'}
-                  </div>
-                </div>
-                <div className="bg-[#F8F9F5] p-2.5 rounded border border-[#DDE0D8]">
-                  <div className="text-[#5B6560]">Priority Score</div>
-                  <div className="text-lg font-bold text-[#B9713A]">
-                    {selectedCounty.forecast?.priority_score?.toFixed(1) ?? 'N/A'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Threshold Crossing Info */}
-              {selectedCounty.forecast?.crossing_date && (
-                <div className="bg-[#FAECEB] p-3 rounded border border-[#C46760] text-xs font-mono text-[#6D221D]">
-                  <div className="font-bold">Crossing Alert:</div>
-                  <div>
-                    Projected {selectedCounty.forecast.crossing_phase} in{' '}
-                    <span className="font-bold">{selectedCounty.forecast.days_to_crossing} days</span> ({selectedCounty.forecast.crossing_date}).
-                  </div>
-                </div>
-              )}
-
-              {/* AI Summary */}
-              {selectedCounty.ai_explanation && (
-                <div className="text-xs text-[#5B6560] leading-relaxed line-clamp-4 font-sans bg-[#F6F6F2] p-3 rounded border border-[#C8CCC0]">
-                  <span className="font-mono font-bold text-[10px] text-[#3B5A37] uppercase block mb-1">
-                    AI Forecast Note:
-                  </span>
-                  {formatInlineText(selectedCounty.ai_explanation)}
-                </div>
-              )}
-
-              <Link
-                href={`/county/${selectedCounty.id}`}
-                className="w-full py-2 bg-[#232A2E] text-white hover:bg-[#3B5A37] transition-colors rounded text-xs font-mono font-semibold flex items-center justify-center gap-1.5"
+              <button
+                onClick={handleRegenerateAi}
+                disabled={generatingAi}
+                className="text-xs font-mono text-[#5B6560] hover:text-[#232A2E] flex items-center gap-1 border border-[#C8CCC0] px-2 py-1 rounded hover:bg-[#EDEEE8]"
               >
-                Inspect Full County Forecast <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
+                <RefreshCw className={`w-3 h-3 ${generatingAi ? 'animate-spin' : ''}`} />
+                <span>Regenerate</span>
+              </button>
             </div>
-          ) : (
-            <div className="p-8 text-center font-mono text-xs text-[#5B6560]">
-              Click any county on the map to inspect its forecast trajectory.
+
+            {/* Explanation Content */}
+            <div className="space-y-3 text-sm text-[#232A2E] leading-relaxed font-sans">
+              {aiResult?.explanation ? (
+                renderFormattedExplanation(aiResult.explanation)
+              ) : (
+                <p className="text-xs font-mono text-[#5B6560]">Generating plain-language explanation...</p>
+              )}
             </div>
-          )}
+
+            {/* Regional Seasonal Outlook — the second signal the AI reconciles
+                against the statistical forecast above (livelihood-specific
+                guidance is now generated directly in the explanation itself,
+                not a separate static note). */}
+            {aiResult?.seasonal_outlook && (
+              <div className="mt-4 p-3 bg-[#F8F9F5] border border-[#DDE0D8] rounded text-xs space-y-1 font-sans">
+                <div className="font-mono font-bold text-[#5B6560] uppercase text-[11px]">
+                  ICPAC Seasonal Outlook ({aiResult.seasonal_outlook.period}):
+                </div>
+                <p className="text-[#232A2E]">{aiResult.seasonal_outlook.rainfall_outlook}</p>
+                <a
+                  href={aiResult.seasonal_outlook.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block text-[11px] text-[#B9713A] underline"
+                >
+                  Source: ICPAC Seasonal Forecast →
+                </a>
+              </div>
+            )}
+
+            {/* Detected cross-county/temporal patterns — computed deterministically
+                by app/services/patterns.py, not by the LLM. This is evidence the
+                2-point AR(2) trend above structurally can't see on its own: a
+                same-month recurrence across prior years, a persistent multi-bulletin
+                severity streak, and/or a simultaneous regional cluster. */}
+            {data.pattern_signals && data.pattern_signals.signals.length > 0 && (
+              <div
+                className="mt-4 p-3 rounded text-xs space-y-2.5 font-sans border"
+                style={{ background: 'var(--accent-bg)', borderColor: 'var(--accent-border)' }}
+              >
+                <div
+                  className="font-mono font-bold uppercase text-[11px]"
+                  style={{ color: 'var(--accent)' }}
+                >
+                  Detected Pattern{data.pattern_signals.signals.length > 1 ? 's' : ''} (computed, not AI-inferred)
+                </div>
+                {data.pattern_signals.signals.map((signal, i) => (
+                  <p key={i} className="text-[#232A2E] leading-relaxed">
+                    {signal.note}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="pt-3 border-t border-[#EDEEE8] text-[11px] font-mono text-[#5B6560] flex items-center justify-between">
+            <span>Model: {aiResult?.model || 'AR(2) forecast + LLM synthesis'}</span>
+            <span>Citations linked to NDMA source data below</span>
+          </div>
         </div>
       </div>
 
-      {/* Regional Cluster Analysis — deterministically computed by
-          app/services/patterns.py::detect_regional_clusters, narrated by
-          the LLM (see llm.py::generate_regional_synthesis). The LLM writes
-          up these clusters; it does not detect them. */}
-      <div className="card p-5 bg-white">
-        <div className="flex items-center gap-2 pb-3 border-b border-[#EDEEE8] mb-3">
-          <Users className="w-4 h-4" style={{ color: 'var(--accent)' }} />
-          <h2 className="text-base font-bold text-[#232A2E]">Regional Cluster Analysis</h2>
+      {/* Bottom Pane: Evidence Trail Table for this County */}
+      <div className="card p-5 bg-white space-y-3">
+        <div className="flex items-center justify-between pb-2 border-b border-[#EDEEE8]">
+          <div>
+            <h2 className="text-base font-bold text-[#232A2E]">County Evidence Trail</h2>
+            <p className="text-xs text-[#5B6560] font-mono">
+              Historical monthly bulletin records extracted for {data.name}
+            </p>
+          </div>
+          <Link
+            href={`/evidence?county_id=${data.id}`}
+            className="text-xs font-mono text-[#B9713A] font-semibold hover:underline"
+          >
+            View Full Evidence Trail →
+          </Link>
         </div>
 
-        {loadingSynthesis ? (
-          <div className="text-xs font-mono text-[#5B6560] py-4 text-center">
-            Analyzing cross-county clusters...
-          </div>
-        ) : !synthesis || synthesis.computed_clusters.length === 0 ? (
-          <div className="text-xs font-mono text-[#5B6560] py-2">
-            No regional cluster currently meets the detection threshold (≥3 counties, ≥50% of a
-            tracked region simultaneously at Alert phase or worse).
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {synthesis.computed_clusters.map((cluster) => (
-                <div
-                  key={cluster.region}
-                  className="p-3 rounded border text-xs font-mono"
-                  style={{ background: 'var(--accent-bg)', borderColor: 'var(--accent-border)' }}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-[#232A2E]">{cluster.region}</span>
-                    <span style={{ color: 'var(--accent)' }} className="font-bold">
-                      {cluster.at_risk_count}/{cluster.region_size} at risk
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs font-mono border-collapse">
+            <thead>
+              <tr className="bg-[#F8F9F5] border-b border-[#C8CCC0] text-[#5B6560]">
+                <th className="py-2.5 px-3">Month</th>
+                <th className="py-2.5 px-3">Phase Classification</th>
+                <th className="py-2.5 px-3">VCI3M Index</th>
+                <th className="py-2.5 px-3">SPI Index</th>
+                <th className="py-2.5 px-3">Source Bulletin</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.historical.map((h, i) => (
+                <tr key={i} className="border-b border-[#EDEEE8] hover:bg-[#F8F9F5]">
+                  <td className="py-2.5 px-3 font-bold text-[#232A2E]">{h.month}</td>
+                  <td className="py-2.5 px-3">
+                    <PhaseBadge phase={h.phase} size="sm" />
+                  </td>
+                  <td className="py-2.5 px-3 font-semibold text-[#232A2E]">{h.vci3m ?? '—'}</td>
+                  <td className="py-2.5 px-3 text-[#5B6560]">{h.spi ?? '—'}</td>
+                  <td className="py-2.5 px-3 text-[#5B6560]">
+                    <span className="inline-flex items-center gap-1 text-[11px] underline cursor-pointer hover:text-[#232A2E]">
+                      <FileText className="w-3 h-3" /> NDMA Bulletin p.{h.source_page || 1}
                     </span>
-                  </div>
-                  <div className="text-[#5B6560]">{cluster.counties.join(', ')}</div>
-                </div>
+                  </td>
+                </tr>
               ))}
-            </div>
-
-            <div className="text-sm text-[#232A2E] leading-relaxed font-sans pt-1">
-              {formatInlineText(synthesis.synthesis)}
-            </div>
-          </div>
-        )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
