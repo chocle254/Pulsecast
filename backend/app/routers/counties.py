@@ -12,6 +12,7 @@ from app.models import (
     CountyOut, CountyDetail, PriorityQueueItem, MapCountyData
 )
 from app.services.llm import generate_regional_synthesis
+from app.services.patterns import detect_regional_clusters
 
 router = APIRouter(prefix="/api/counties", tags=["counties"])
 
@@ -66,7 +67,7 @@ async def _priority_queue_data(
                b.phase as current_phase, b.vci3m as current_vci3m,
                f.forecast_values, f.crossing_date, f.crossing_phase,
                f.days_to_crossing, f.confidence, f.priority_score,
-               f.ai_explanation as ai_summary
+               f.ai_explanation as ai_summary, f.pattern_signals
         FROM counties c
         LEFT JOIN bulletins b ON b.county_id = c.id
             AND b.month = (SELECT MAX(month) FROM bulletins WHERE county_id = c.id)
@@ -142,6 +143,7 @@ async def _priority_queue_data(
             priority_score=row.get("priority_score") or 0.0,
             sparkline_data=sparkline,
             ai_summary=row.get("ai_summary"),
+            pattern_signals=json.loads(row["pattern_signals"]) if row.get("pattern_signals") else None,
         ))
 
     return items
@@ -168,9 +170,22 @@ async def get_priority_queue(
 
 @router.get("/regional-synthesis")
 async def get_regional_synthesis():
-    """AI cross-county pattern synthesis over the current priority queue."""
+    """AI narrative over Pulsecast's deterministically computed regional clusters."""
     queue = await _priority_queue_data(limit=47)
-    return await generate_regional_synthesis([item.model_dump() for item in queue])
+
+    latest_rows = await execute_query(
+        """SELECT c.id as county_id, c.name as county_name, c.region,
+                  b.phase as phase
+           FROM counties c
+           LEFT JOIN bulletins b ON b.county_id = c.id
+               AND b.month = (SELECT MAX(month) FROM bulletins WHERE county_id = c.id)
+           WHERE b.phase IS NOT NULL"""
+    )
+    computed_clusters = detect_regional_clusters(latest_rows)
+
+    return await generate_regional_synthesis(
+        [item.model_dump() for item in queue], computed_clusters
+    )
 
 
 @router.get("/map-data", response_model=list[MapCountyData])
@@ -180,7 +195,7 @@ async def get_map_data():
         SELECT c.id as county_id, c.name as county_name,
                b.phase as current_phase, b.vci3m,
                f.crossing_phase as forecast_phase,
-               f.days_to_crossing, f.priority_score
+               f.days_to_crossing, f.priority_score, f.pattern_signals
         FROM counties c
         LEFT JOIN bulletins b ON b.county_id = c.id
             AND b.month = (SELECT MAX(month) FROM bulletins WHERE county_id = c.id)
@@ -197,6 +212,7 @@ async def get_map_data():
         days_to_crossing=r.get("days_to_crossing"),
         priority_score=r.get("priority_score"),
         vci3m=r.get("vci3m"),
+        pattern_signals=json.loads(r["pattern_signals"]) if r.get("pattern_signals") else None,
     ) for r in rows]
 
 
@@ -234,6 +250,7 @@ async def get_county_detail(county_id: int):
 
     forecast = None
     ai_explanation = None
+    pattern_signals = None
     if forecast_row:
         forecast = {
             "generated_at": forecast_row["generated_at"],
@@ -246,6 +263,8 @@ async def get_county_detail(county_id: int):
             "priority_score": forecast_row.get("priority_score"),
         }
         ai_explanation = forecast_row.get("ai_explanation")
+        if forecast_row.get("pattern_signals"):
+            pattern_signals = json.loads(forecast_row["pattern_signals"])
 
     return CountyDetail(
         id=county["id"],
@@ -260,6 +279,7 @@ async def get_county_detail(county_id: int):
         historical=historical,
         forecast=forecast,
         ai_explanation=ai_explanation,
+        pattern_signals=pattern_signals,
     )
 
 
