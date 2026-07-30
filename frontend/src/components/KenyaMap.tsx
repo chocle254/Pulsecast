@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import PhaseBadge from './PhaseBadge';
+import PatternBadge from './PatternBadge';
 import { MapCountyData } from '@/lib/api';
 import { KENYA_COUNTY_PATHS, KENYA_MAP_VIEWBOX } from '@/lib/kenyaCountyPaths';
 
@@ -104,7 +105,10 @@ export default function KenyaMap({ counties, onSelectCounty, compact = false }: 
           <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-xs p-3 rounded-md shadow-lg border border-gray-300 w-56 pointer-events-none z-10 transition-opacity duration-150">
             <div className="flex items-center justify-between mb-1.5">
               <span className="font-bold text-sm text-gray-900">{hoveredCounty.county_name}</span>
-              {hoveredCounty.current_phase && <PhaseBadge phase={hoveredCounty.current_phase} size="sm" />}
+              <div className="flex items-center gap-1">
+                {hoveredCounty.current_phase && <PhaseBadge phase={hoveredCounty.current_phase} size="sm" />}
+                <PatternBadge signals={hoveredCounty.pattern_signals} size="sm" />
+              </div>
             </div>
 
             <div className="space-y-1 text-xs font-mono text-gray-600">
