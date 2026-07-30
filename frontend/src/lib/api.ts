@@ -1,5 +1,24 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
+export interface PatternSignal {
+  type: 'recurrence' | 'regional_cluster';
+  note: string;
+  // recurrence-only fields
+  same_month_years?: string[];
+  same_month_occurrences?: { month: string; phase: string }[];
+  persistent_streak?: number | null;
+  streak_occurrences?: { month: string; phase: string }[];
+  // regional_cluster-only fields
+  region?: string;
+  at_risk_count?: number;
+  region_size?: number;
+  peer_counties?: string[];
+}
+
+export interface PatternSignals {
+  signals: PatternSignal[];
+}
+
 export interface PriorityItem {
   rank: number;
   county_id: number;
@@ -16,6 +35,7 @@ export interface PriorityItem {
   priority_score: number;
   sparkline_data: number[];
   ai_summary: string | null;
+  pattern_signals: PatternSignals | null;
 }
 
 export interface CountyDetail {
@@ -47,6 +67,7 @@ export interface CountyDetail {
     priority_score: number;
   } | null;
   ai_explanation: string | null;
+  pattern_signals: PatternSignals | null;
 }
 
 export interface SeasonalOutlook {
@@ -61,6 +82,7 @@ export interface AiExplanation {
   county_name: string;
   livelihood_zone: string | null;
   seasonal_outlook: SeasonalOutlook | null;
+  pattern_signals: PatternSignals | null;
   explanation: string;
   citations: { field: string; value: string; position?: number }[];
   generated_at: string;
@@ -88,6 +110,7 @@ export interface MapCountyData {
   days_to_crossing: number | null;
   priority_score: number | null;
   vci3m: number | null;
+  pattern_signals: PatternSignals | null;
 }
 
 export interface BacktestSummary {
@@ -157,6 +180,27 @@ export async function fetchCountyExplanation(
 export async function fetchMapData(): Promise<MapCountyData[]> {
   const res = await fetch(`${API_BASE}/api/counties/map-data`);
   if (!res.ok) throw new Error('Failed to fetch map data');
+  return res.json();
+}
+
+export interface ComputedCluster {
+  region: string;
+  at_risk_count: number;
+  region_size: number;
+  counties: string[];
+}
+
+export interface RegionalSynthesis {
+  synthesis: string;
+  citations: { field: string; value: string; position?: number }[];
+  computed_clusters: ComputedCluster[];
+  generated_at: string;
+  model: string;
+}
+
+export async function fetchRegionalSynthesis(): Promise<RegionalSynthesis> {
+  const res = await fetch(`${API_BASE}/api/counties/regional-synthesis`);
+  if (!res.ok) throw new Error('Failed to fetch regional synthesis');
   return res.json();
 }
 
