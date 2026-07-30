@@ -15,7 +15,7 @@ from app.services.calibration import compute_confidence_calibration
 from app.services.forecast import generate_county_forecast
 from app.services.historical_seed import expand_historical_records
 from app.services.ingestion import ALL_COUNTIES, ingest_all_bulletins
-from app.services.parser import parse_county_bulletin
+from app.services.parser import parse_county_bulletin_with_ai_fallback
 from app.services.patterns import (
     combine_pattern_signals,
     detect_recurrence_pattern,
@@ -117,9 +117,10 @@ async def seed_database() -> None:
         backfilled = await _backfill_historical_data(db, county_ids)
 
         inserted_records = 0
+        ai_recovered_records = 0
         parsed_at = datetime.now(timezone.utc).isoformat()
         for bulletin in downloaded_bulletins:
-            record = parse_county_bulletin(
+            record = await parse_county_bulletin_with_ai_fallback(
                 bulletin["path"],
                 bulletin["county_name"],
                 bulletin["month"],
@@ -135,17 +136,23 @@ async def seed_database() -> None:
                 )
                 continue
 
+            if record["parsing_method"] == "ai_fallback":
+                ai_recovered_records += 1
+
             await db.execute(
                 """INSERT INTO bulletins
-                   (county_id, month, vci3m, spi, phase, source_url, source_page, parsed_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   (county_id, month, vci3m, spi, phase, source_url, source_page,
+                    parsed_at, parsing_method, ai_evidence)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(county_id, month) DO UPDATE SET
                        vci3m = excluded.vci3m,
                        spi = excluded.spi,
                        phase = excluded.phase,
                        source_url = excluded.source_url,
                        source_page = excluded.source_page,
-                       parsed_at = excluded.parsed_at""",
+                       parsed_at = excluded.parsed_at,
+                       parsing_method = excluded.parsing_method,
+                       ai_evidence = excluded.ai_evidence""",
                 (
                     county_id,
                     record["month"],
@@ -155,6 +162,8 @@ async def seed_database() -> None:
                     bulletin["url"],
                     record["source_page"],
                     parsed_at,
+                    record["parsing_method"],
+                    record["ai_evidence"],
                 ),
             )
             inserted_records += 1
@@ -177,8 +186,9 @@ async def seed_database() -> None:
         await _regenerate_forecasts(db)
         await db.commit()
         logger.info(
-            "Loaded %s live NDMA bulletin records + %s historical backfill records",
-            inserted_records, backfilled,
+            "Loaded %s live NDMA bulletin records (%s recovered by AI parsing fallback) "
+            "+ %s historical backfill records",
+            inserted_records, ai_recovered_records, backfilled,
         )
     finally:
         await db.close()
