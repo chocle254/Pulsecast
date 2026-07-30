@@ -100,6 +100,8 @@ export interface EvidenceRecord {
   source_url: string | null;
   source_page: number | null;
   parsed_at: string;
+  parsing_method: string;
+  ai_evidence: string | null;
 }
 
 export interface MapCountyData {
