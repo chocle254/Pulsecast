@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS bulletins (
     source_url TEXT,
     source_page INTEGER,
     parsed_at TEXT NOT NULL,      -- ISO timestamp
+    parsing_method TEXT NOT NULL DEFAULT 'regex',  -- 'regex' or 'ai_fallback' — see parser.py
+    ai_evidence TEXT,             -- verbatim source quote the AI cited, only set when parsing_method = 'ai_fallback'
     FOREIGN KEY (county_id) REFERENCES counties(id),
     UNIQUE(county_id, month)
 );
@@ -93,6 +95,16 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
 
     if "pattern_signals" not in existing_columns:
         await db.execute("ALTER TABLE forecasts ADD COLUMN pattern_signals TEXT")
+
+    cursor = await db.execute("PRAGMA table_info(bulletins)")
+    existing_bulletin_columns = {row["name"] for row in await cursor.fetchall()}
+
+    if "parsing_method" not in existing_bulletin_columns:
+        await db.execute(
+            "ALTER TABLE bulletins ADD COLUMN parsing_method TEXT NOT NULL DEFAULT 'regex'"
+        )
+    if "ai_evidence" not in existing_bulletin_columns:
+        await db.execute("ALTER TABLE bulletins ADD COLUMN ai_evidence TEXT")
 
 
 async def execute_query(query: str, params: tuple = (), fetchone: bool = False):
