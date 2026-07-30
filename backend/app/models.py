@@ -27,6 +27,7 @@ class CountyDetail(CountyOut):
     historical: list[dict] = []
     forecast: Optional[dict] = None
     ai_explanation: Optional[str] = None
+    pattern_signals: Optional[dict] = None
 
 
 # --- Bulletin ---
@@ -65,6 +66,7 @@ class ForecastOut(BaseModel):
     confidence: Optional[float] = None
     priority_score: Optional[float] = None
     ai_explanation: Optional[str] = None
+    pattern_signals: Optional[dict] = None
 
 
 # --- Priority Queue ---
@@ -85,6 +87,7 @@ class PriorityQueueItem(BaseModel):
     priority_score: float
     sparkline_data: list[float] = []
     ai_summary: Optional[str] = None
+    pattern_signals: Optional[dict] = None
 
 
 # --- Backtest ---
@@ -118,6 +121,7 @@ class MapCountyData(BaseModel):
     days_to_crossing: Optional[int] = None
     priority_score: Optional[float] = None
     vci3m: Optional[float] = None
+    pattern_signals: Optional[dict] = None
 
 
 # --- LLM ---
