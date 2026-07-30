@@ -43,6 +43,8 @@ class BulletinRecord(BaseModel):
     source_url: Optional[str] = None
     source_page: Optional[int] = None
     parsed_at: str
+    parsing_method: str = "regex"
+    ai_evidence: Optional[str] = None
 
 
 # --- Forecast ---
