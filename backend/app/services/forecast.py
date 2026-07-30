@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from app.services.parser import VCI3M_THRESHOLDS, classify_from_vci3m, get_phase_severity
+from app.services.patterns import pattern_score_boost
 
 logger = logging.getLogger(__name__)
 
@@ -218,20 +219,27 @@ def calculate_priority_score(
     current_phase: str,
     days_to_crossing: Optional[int],
     confidence: Optional[float],
-    current_vci3m: Optional[float] = None
+    current_vci3m: Optional[float] = None,
+    pattern_signals: Optional[dict] = None
 ) -> float:
     """
-    Calculate priority score: severity × time-urgency × confidence.
-    
+    Calculate priority score: severity × time-urgency × confidence,
+    plus an additive boost for cross-county/temporal patterns the AR(2)
+    trend itself can't see (see patterns.py).
+
     Higher score = higher priority (needs attention first).
     """
     # Severity component (0-4)
     severity = get_phase_severity(current_phase)
-    
+
     if days_to_crossing is None or confidence is None:
-        # No crossing detected — base priority on current severity
-        return round(severity * 10.0, 1)
-    
+        # No crossing detected — base priority on current severity,
+        # still eligible for a pattern boost (this is exactly the case
+        # a persistent/clustered county with a flat AR(2) trend hits).
+        score = severity * 10.0
+        score += pattern_score_boost(pattern_signals)
+        return round(max(0.0, min(100.0, score)), 1)
+
     # Time urgency (inversely proportional to days — sooner = more urgent)
     max_days = 42  # 6 weeks
     time_urgency = max(0.1, 1.0 - (days_to_crossing / max_days))
@@ -248,7 +256,9 @@ def calculate_priority_score(
             if current_vci3m < threshold + 5:  # Within 5 points of a threshold
                 score += 10
                 break
-    
+
+    score += pattern_score_boost(pattern_signals)
+
     return round(max(0.0, min(100.0, score)), 1)
 
 
@@ -257,7 +267,8 @@ def generate_county_forecast(
     historical_vci3m: list[float],
     current_phase: str,
     forecast_weeks: int = 6,
-    calibration: Optional[dict] = None
+    calibration: Optional[dict] = None,
+    pattern_signals: Optional[dict] = None
 ) -> dict:
     """
     Generate a complete forecast for a single county.
@@ -274,6 +285,7 @@ def generate_county_forecast(
             "days_to_crossing": None,
             "confidence": None,
             "priority_score": 0.0,
+            "pattern_signals": pattern_signals,
         }
     
     current_vci3m = historical_vci3m[-1]
@@ -291,7 +303,8 @@ def generate_county_forecast(
         current_phase,
         crossing["days_to_crossing"],
         crossing["confidence"],
-        current_vci3m
+        current_vci3m,
+        pattern_signals=pattern_signals,
     )
     
     return {
@@ -304,4 +317,5 @@ def generate_county_forecast(
         "days_to_crossing": crossing["days_to_crossing"],
         "confidence": crossing["confidence"],
         "priority_score": priority,
+        "pattern_signals": pattern_signals,
     }
