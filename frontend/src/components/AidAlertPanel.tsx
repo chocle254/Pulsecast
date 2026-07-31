@@ -12,6 +12,7 @@ import {
   MessageSquare,
   ChevronDown,
   Trash2,
+  PawPrint,
 } from 'lucide-react';
 
 /**
@@ -25,29 +26,31 @@ import {
  *
  * HACKATHON SCOPE: there is no real SMS gateway wired up. Sending is
  * *simulated* — the exact text that would go out over SMS is rendered on
- * screen (per language) instead of actually being dispatched. Swapping in a
- * real provider (e.g. Africa's Talking / Twilio) later only means replacing
- * `simulateBroadcast()` below with a real API call; nothing else about this
- * component needs to change.
+ * screen (per language) instead of actually being dispatched.
  *
- * ACCESS CONTROL: per the product plan, this is meant to be open to any user
- * for the hackathon demo, and locked to *verified NGO officials only* once
- * the product ships for real. Rather than hardcoding "anyone can use this",
- * the gating already lives here as `REQUIRE_NGO_VERIFICATION` — a single
- * flag to flip post-hackathon. The role selector below lets you preview both
- * states today. Wiring `isVerifiedNgoOfficial` to a real value later is a
- * one-line change: pull it from the authenticated session (e.g. a
- * `role: "ngo_official"` claim on the user's account) instead of local state.
+ * ACCESS CONTROL: gated behind REQUIRE_NGO_VERIFICATION — a single flag to
+ * flip post-hackathon. While false, every visitor is treated as verified so
+ * the feature stays demoable pre-launch.
+ *
+ * LIVELIHOOD-AWARE AID: the county's livelihood_zone is used to flag
+ * pastoralist areas, since a pastoralist household's needs include feed and
+ * water for livestock in addition to human aid — this nudges the coordinator
+ * toward the right aid type and a larger volume estimate.
  */
 
-// Flip this to true once real NGO-official auth exists. While false, every
-// visitor is treated as verified so the feature stays demoable pre-launch.
 const REQUIRE_NGO_VERIFICATION = false;
 
-// Which forecast phases are severe enough to show the aid-alert tool at all.
-// Alert/Alarm per the product spec; Emergency is included too since it's
-// strictly more urgent than Alarm — remove it here if you want it stricter.
 export const AID_ALERT_ELIGIBLE_PHASES = ['Alert', 'Alarm', 'Emergency'];
+
+// Livelihood zones considered pastoralist/agro-pastoralist for aid-sizing
+// purposes — livestock feed & water needs apply on top of human aid.
+const PASTORALIST_KEYWORDS = ['pastoral', 'agro-pastoral'];
+
+function isPastoralistZone(zone: string | null | undefined): boolean {
+  if (!zone) return false;
+  const z = zone.toLowerCase();
+  return PASTORALIST_KEYWORDS.some((k) => z.includes(k));
+}
 
 interface AidType {
   value: string;
@@ -99,8 +102,6 @@ function formatTime(timeStr: string): string {
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
-/** Builds the exact SMS text for a given language. Template-based (not an
- *  LLM call) so the broadcast is instant and works offline in a demo. */
 function buildMessage(
   lang: LangCode,
   countyName: string,
@@ -113,9 +114,9 @@ function buildMessage(
   const dateFmt = formatDate(dateStr);
   const timeFmt = formatTime(timeStr);
   const locList = locations.join(', ');
+  const notePart = notes.trim() ? ` ${notes.trim()}` : '';
 
   if (lang === 'sw') {
-    const notePart = notes.trim() ? ` ${notes.trim()}` : '';
     return (
       `TAHADHARI YA MSAADA (PULSECAST): ${aidType.label_sw} itagawiwa katika Kaunti ya ${countyName} ` +
       `tarehe ${dateFmt} saa ${timeFmt}. Mahali pa ugawaji: ${locList}.${notePart} ` +
@@ -123,7 +124,6 @@ function buildMessage(
     );
   }
 
-  const notePart = notes.trim() ? ` ${notes.trim()}` : '';
   return (
     `PULSECAST AID ALERT: ${aidType.label_en} will be distributed in ${countyName} County on ${dateFmt} at ${timeFmt}. ` +
     `Distribution point(s): ${locList}.${notePart} ` +
@@ -132,14 +132,23 @@ function buildMessage(
 }
 
 function smsSegmentCount(text: string): number {
-  // Standard GSM-7 SMS: 160 chars for a single segment, 153 per segment
-  // once it has to concatenate across multiple messages.
   if (text.length <= 160) return 1;
   return Math.ceil(text.length / 153);
 }
 
-export default function AidAlertPanel({ countyId, countyName, phase }: { countyId: number; countyName: string; phase: string }) {
+export default function AidAlertPanel({
+  countyId,
+  countyName,
+  phase,
+  livelihoodZone,
+}: {
+  countyId: number;
+  countyName: string;
+  phase: string;
+  livelihoodZone?: string | null;
+}) {
   const eligible = AID_ALERT_ELIGIBLE_PHASES.includes(phase);
+  const pastoralist = isPastoralistZone(livelihoodZone);
 
   const [viewAsRole, setViewAsRole] = useState<'ngo' | 'resident'>('ngo');
   const isVerifiedNgoOfficial = REQUIRE_NGO_VERIFICATION ? viewAsRole === 'ngo' : true;
@@ -156,6 +165,13 @@ export default function AidAlertPanel({ countyId, countyName, phase }: { countyI
   const [sentAlerts, setSentAlerts] = useState<SentAlert[]>([]);
 
   const storageKey = `pulsecast_aid_alerts_${countyId}`;
+
+  // Nudge the default aid type toward livestock support in pastoralist zones
+  // (only before the coordinator has touched the field).
+  useEffect(() => {
+    if (pastoralist) setAidTypeValue('livestock');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countyId, pastoralist]);
 
   useEffect(() => {
     try {
@@ -188,23 +204,154 @@ export default function AidAlertPanel({ countyId, countyName, phase }: { countyI
     date && time && locations.length > 0
       ? {
           en: buildMessage('en', countyName, aidType, date, time, locations, notes),
-< truncated lines 191-318 >
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full border border-[#C8CCC0] rounded-md px-3 py-2 text-sm bg-white"
-                />
+          sw: buildMessage('sw', countyName, aidType, date, time, locations, notes),
+        }
+      : null;
+
+  function handleSend() {
+    setErrorMsg(null);
+    if (!date || !time) {
+      setErrorMsg('Please set a distribution date and time.');
+      return;
+    }
+    if (locations.length === 0) {
+      setErrorMsg('Add at least one distribution location.');
+      return;
+    }
+    if (selectedLangs.length === 0) {
+      setErrorMsg('Select at least one broadcast language.');
+      return;
+    }
+    setSending(true);
+    const messages = {
+      en: buildMessage('en', countyName, aidType, date, time, locations, notes),
+      sw: buildMessage('sw', countyName, aidType, date, time, locations, notes),
+    };
+    const alert: SentAlert = {
+      id: `${Date.now()}`,
+      sentAt: new Date().toISOString(),
+      aidTypeLabel: { en: aidType.label_en, sw: aidType.label_sw },
+      date,
+      time,
+      locations,
+      notes,
+      messages,
+    };
+    setTimeout(() => {
+      const updated = [alert, ...sentAlerts];
+      setSentAlerts(updated);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(updated));
+      } catch {
+        // non-fatal — history just won't persist
+      }
+      setDate('');
+      setTime('');
+      setLocations([]);
+      setNotes('');
+      setSending(false);
+    }, 600);
+  }
+
+  function clearHistory() {
+    setSentAlerts([]);
+    try {
+      localStorage.removeItem(storageKey);
+    } catch {
+      // ignore
+    }
+  }
+
+  return (
+    <div className="card p-5 bg-white space-y-4 border-2" style={{ borderColor: 'var(--phase-alarm)' }}>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <Radio className="w-4 h-4" style={{ color: 'var(--phase-alarm)' }} />
+          <span className="font-mono font-bold text-sm text-[#232A2E] uppercase tracking-wide">
+            NGO Aid Alert — {countyName} County
+          </span>
+        </div>
+        {!REQUIRE_NGO_VERIFICATION ? null : (
+          <div className="flex items-center gap-1 text-xs font-mono">
+            <button
+              type="button"
+              onClick={() => setViewAsRole('ngo')}
+              className={`px-2 py-1 rounded border ${viewAsRole === 'ngo' ? 'bg-[#232A2E] text-white border-[#232A2E]' : 'border-[#C8CCC0] text-[#5B6560]'}`}
+            >
+              View as NGO official
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewAsRole('resident')}
+              className={`px-2 py-1 rounded border ${viewAsRole === 'resident' ? 'bg-[#232A2E] text-white border-[#232A2E]' : 'border-[#C8CCC0] text-[#5B6560]'}`}
+            >
+              View as resident
+            </button>
+          </div>
+        )}
+      </div>
+
+      {pastoralist && (
+        <div className="flex items-start gap-2 text-xs font-mono bg-[#FBF3E4] border border-[#D8B978] rounded px-3 py-2 text-[#6B5313]">
+          <PawPrint className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span>
+            <strong>{countyName}</strong> is a <strong>{livelihoodZone}</strong> livelihood zone. Pastoralist
+            households typically need feed and water for livestock alongside human aid — factor this into the
+            aid type and volume you plan for.
+          </span>
+        </div>
+      )}
+
+      {!isVerifiedNgoOfficial ? (
+        <div className="flex items-center gap-2 text-xs font-mono text-[#5B6560] bg-[#F8F9F5] border border-[#DDE0D8] rounded px-3 py-3">
+          <Lock className="w-4 h-4" />
+          This tool is restricted to verified NGO officials.
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-1.5 text-[11px] font-mono text-[#5B6560]">
+            <ShieldCheck className="w-3.5 h-3.5" style={{ color: 'var(--phase-normal)' }} />
+            Verified NGO official
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className="text-xs font-mono font-bold text-[#5B6560] block mb-1">
+                Aid Type {pastoralist && <span className="normal-case font-normal text-[#9AA39C]">(livestock support pre-selected for this zone)</span>}
+              </label>
+              <div className="relative">
+                <select
+                  value={aidTypeValue}
+                  onChange={(e) => setAidTypeValue(e.target.value)}
+                  className="w-full appearance-none border border-[#C8CCC0] rounded-md px-3 py-2 text-sm bg-white pr-8"
+                >
+                  {AID_TYPES.map((a) => (
+                    <option key={a.value} value={a.value}>
+                      {a.label_en}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-4 h-4 absolute right-2.5 top-2.5 text-[#5B6560] pointer-events-none" />
               </div>
-              <div>
-                <label className="text-xs font-mono font-bold text-[#5B6560] block mb-1">Time</label>
-                <input
-                  type="time"
-                  value={time}
-                  onChange={(e) => setTime(e.target.value)}
-                  className="w-full border border-[#C8CCC0] rounded-md px-3 py-2 text-sm bg-white"
-                />
-              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-mono font-bold text-[#5B6560] block mb-1">Date</label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full border border-[#C8CCC0] rounded-md px-3 py-2 text-sm bg-white"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-mono font-bold text-[#5B6560] block mb-1">Time</label>
+              <input
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className="w-full border border-[#C8CCC0] rounded-md px-3 py-2 text-sm bg-white"
+              />
             </div>
 
             <div className="md:col-span-2">
@@ -258,7 +405,7 @@ export default function AidAlertPanel({ countyId, countyName, phase }: { countyI
                 type="text"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="e.g. Priority for households with children under 5"
+                placeholder={pastoralist ? 'e.g. Bring livestock headcount for feed allocation' : 'e.g. Priority for households with children under 5'}
                 className="w-full border border-[#C8CCC0] rounded-md px-3 py-2 text-sm bg-white"
               />
             </div>
@@ -288,7 +435,6 @@ export default function AidAlertPanel({ countyId, countyName, phase }: { countyI
             <div className="text-xs font-mono text-[#9B3B34] bg-[#FAECEB] border border-[#C46760] rounded px-3 py-2">{error}</div>
           )}
 
-          {/* --- Live SMS Preview --- */}
           {preview && (
             <div className="border-t border-[#EDEEE8] pt-4">
               <div className="flex items-center gap-2 mb-2">
@@ -324,7 +470,6 @@ export default function AidAlertPanel({ countyId, countyName, phase }: { countyI
         </>
       )}
 
-      {/* --- Sent history --- */}
       {isVerifiedNgoOfficial && sentAlerts.length > 0 && (
         <div className="border-t border-[#EDEEE8] pt-4 space-y-3">
           <div className="flex items-center justify-between">
