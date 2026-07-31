@@ -1,128 +1,173 @@
-# Pulsecast — Product & Design Spec
+# Pulsecast
 
-## Problem
+**Drought forecasting and aid-alert broadcasting for Kenya's 23 ASAL counties — built on NDMA's own data.**
 
-NDMA already collects the data and defines the phase system — but it's a *monitoring* system, not a forecasting one. It shows coordinators what's happening now, not what's coming. Every user currently does the same manual work every month: read a dense PDF bulletin, translate the technical indicators, judge which counties need attention first, then decide what to do — with no lead time to act before a phase change is already official, and no easy way to see several counties drifting toward the same crisis at once.
-
-## Solution
-
-Pulsecast takes NDMA's own published data, phases, and thresholds and projects them forward — using a peer-reviewed, NDMA-co-developed forecasting method — so a coordinator sees not just where a county stands today, but when it's likely to cross into a worse phase, weeks before the next bulletin confirms it. It compresses "read → translate → judge → decide" into "open dashboard → see a ranked, explained, sourced forecast → act," with every number traceable back to its source so it holds up as real evidence, not an AI guess.
+Built for the [IGAD Hackathon 2026: Smarter Early Warning, Stronger Communities](https://ndma-hackathon.devpost.com/).
 
 ---
 
-## Data & Technology Disclosure
+## The problem
 
-Per the hackathon rules, every external data source, API, and tool used is listed here.
+Kenya's National Drought Management Authority (NDMA) publishes real, government-defined drought bulletins every month — a five-phase system (Normal → Alert → Alarm → Emergency) covering all 23 Arid and Semi-Arid Lands counties. It's a genuinely good monitoring system.
 
-**Data sources**
-- NDMA County Drought Early Warning Bulletins (live) — scraped from NDMA KnowledgeWeb's public bulletin listing; every value in the app traces back to one of these PDFs (see the Evidence Trail page).
-- NDMA historical phase data (2022–2026) — NDMA's own bulletin archive sits behind a JavaScript-driven filter grid this scraper can't crawl live, so this range was compiled by hand from publicly available past bulletins found via search, not synthetically generated. It only fills gaps a live scrape can't reach, and never overwrites a live-parsed record for the same county/month.
-- ICPAC seasonal rainfall outlook — a second, independent signal the AI reconciles against the statistical forecast rather than treating either as automatically correct.
+But it's a monitoring system, not a forecasting one — it reports what's already true. Every month, county coordinators and NGO field officers repeat the same manual cycle: read a dense PDF, judge which counties look like they're drifting toward trouble, then decide whether to act — often only after the phase change is already official and the lead time to prepare is gone.
 
-**AI / APIs**
-- Groq API (Llama-family chat completions) — powers the AI translation, backtest audit, regional synthesis, and PDF-parsing-fallback layers.
-- NVIDIA NIM — fallback LLM provider if Groq is unavailable.
+## The solution
 
-**Backend**
-- FastAPI, Uvicorn, pdfplumber (PDF parsing), httpx, BeautifulSoup4 (scraping), aiosqlite/SQLite, statsmodels/numpy/scipy/pandas (AR(2) forecasting model), Pydantic.
+Pulsecast takes NDMA's own published bulletins and does two things NDMA's bulletin can't:
 
-**Frontend**
-- Next.js, React, D3 + topojson-client (choropleth map), Tailwind CSS, Framer Motion, lucide-react.
+1. **Forecasts.** A per-county model projects each county's vegetation-condition trend 4–6 weeks ahead and flags the exact date it's likely to cross into a worse NDMA phase — ranked into one priority queue, explained in plain language, with every claim traceable back to its source bulletin.
+2. **Acts.** The moment a county's *confirmed* phase enters Alert, Alarm, or Emergency, a **Send Aid** panel unlocks on that county's page. A coordinator drafts a real distribution — aid type, date, time, drop-off points — and Pulsecast generates a ready-to-broadcast SMS alert in **English and Kiswahili**, sized to real segment limits, with aid type automatically nudged toward livestock feed and water in pastoralist counties.
 
-**Hosting**
-- Backend on Railway, frontend on Vercel.
-
-All of the above are open-source libraries or publicly documented commercial APIs, used within their published terms.
+Pulsecast doesn't just tell someone what's coming. It gives them the message that gets a community ready for it.
 
 ---
 
-## Features — what and why
+## Features
 
-### Data ingestion
-- **Bulletin fetcher** — pulls NDMA's monthly PDFs automatically. Manual pulling defeats the point.
-- **PDF parser** — extracts per-county phase + VCI3M/SPI values. Everything downstream depends on this being reliable.
-- **Historical backfill** — reconstructs a multi-month series per county. Needed for the model to learn from, and for the backtest to check against.
-- **Structured storage** — normalizes messy PDF output into clean `{county, month, VCI3M, SPI, phase}` records.
+### Data ingestion & parsing
+- Live scraper pulls NDMA's monthly drought bulletin PDFs directly from NDMA KnowledgeWeb.
+- PDF parser extracts per-county VCI3M / SPI values and phase classification.
+- Historical backfill (2022–2026) fills gaps the live scraper can't reach, without ever overwriting a live-parsed record.
 
 ### Forecasting engine
-- **Per-county AR model** — the actual "weeks in advance" claim. Without it this is just a nicer viewer for data NDMA already publishes.
-- **4–6 week VCI3M projection** — matches the lead time the underlying research shows is actually useful for preparedness action.
-- **Threshold-crossing detector** — turns a raw forecast number into the question a coordinator actually asks: *is this about to get worse, and when.*
-
-### Priority & classification
-- **Mapping onto NDMA's real 5-phase system** — using government categories instead of an invented score is what makes this usable in an actual CSG meeting, not just a demo.
-- **Priority score** (severity × time-to-crossing × confidence) — turns dozens of individual forecasts into one ranked list, which is the actual product for someone with limited time.
-- **Ranked, sortable queue** — the primary interaction: top-down urgency scanning, not county-by-county lookup.
+- Per-county AR(2) model (Yule-Walker / OLS estimation, with a naive-model fallback for sparse counties) projects VCI3M 4–6 weeks ahead.
+- Threshold-crossing detector flags the exact date a county is on track to cross into a worse NDMA phase.
+- Priority score (severity × time-to-crossing × confidence) collapses 23 individual forecasts into one ranked, actionable queue.
+- Forecasts are cross-checked against ICPAC's independent seasonal rainfall outlook rather than trusted alone.
 
 ### AI translation layer
-- **Plain-language explanation** — replaces the manual "translate the bulletin" step — the actual bottleneck this exists to remove.
-- **Grounding/citation to source values** — every generated sentence traceable to a real number. This is the line between a decision-support tool and an LLM confidently making things up about a humanitarian topic. Non-negotiable, not a nice-to-have.
+- Raw forecast numbers are translated into plain-language explanations.
+- Every generated sentence is grounded and citation-linked back to the exact source value — no ungrounded claims about a humanitarian topic.
+- Livelihood-aware: pastoralist and agro-pastoralist counties get different guidance than food-only counties.
 
-### Validation / trust layer
-- **Backtest panel** — forecast vs. what NDMA's later bulletins actually confirmed. This is what earns trust from someone who has no reason to believe a new tool over their own read of the bulletin.
-- **Confidence per forecast** — monthly-cadence data will be noisier than the dense satellite data the original research used. Showing uncertainty honestly protects credibility more than a clean-looking number would.
+### Trust & validation
+- **Evidence Trail** — every value in the app links back to the specific page of its source PDF.
+- **Backtest panel** — past forecasts compared against what NDMA's later bulletins actually confirmed, so the system's track record is visible, not asserted.
+- Confidence shown plainly next to every forecast.
 
-### Depth features
-- **Livelihood-specific guidance** (pastoralist vs. agro-pastoralist) — same forecast, different implied action depending on how people use the land. This is where "actionable" stops being a buzzword.
-- **Sensitivity note** ("what would change this") — turns a static forecast into something a coordinator can reason with, not just read.
-- **Swahili output** — the people implementing the response aren't only the English-reading coordinator.
-- **Choropleth map** — fastest way to see neighboring counties drifting toward the same phase at once, which a list view hides.
-- **Shareable summary / export** — a coordinator's real next move is putting this in front of other people (a CSG meeting, a field-team message). One button that copies a clean, sourced summary is cheap and closes that loop.
+### Send Aid — bilingual crisis alert broadcasting
+- Gated on NDMA's own phase thresholds: the panel only appears once a county's *current, bulletin-confirmed* phase is Alert, Alarm, or Emergency. There's no path to send a crisis alert for a county that isn't actually in crisis.
+- Coordinator enters aid type, date/time, and drop-off locations; Pulsecast composes the outbound SMS text in English **and** Kiswahili, with a live segment counter.
+- Aid type defaults to livestock feed & veterinary support in pastoralist livelihood zones, flagged explicitly.
+- **Deliberately template-built, not LLM-generated** — a humanitarian broadcast (what aid, where, for whom) is exactly the kind of consequential output that shouldn't come from a model that can hallucinate. Every field in the message is a value the coordinator explicitly entered.
+- Hackathon scope: sending is simulated — the exact outbound text is rendered on screen and logged rather than dispatched through a live SMS gateway. Wiring this to a provider like Africa's Talking is the disclosed next step.
 
----
-
-## Visual direction
-
-This is a field instrument for a serious decision, not a SaaS dashboard — closer to a met-office chart or a survey sheet than a startup product. Explicitly avoiding the two reflexive AI-dashboard looks: warm-cream-and-serif-with-terracotta, and near-black-with-one-neon-accent.
-
-**Color** — a cool, slightly desaturated "field paper" base, not warm cream:
-- `bg` `#EDEEE8` · `surface` `#F6F6F2` · `ink` `#232A2E` · `ink-muted` `#5B6560`
-
-Then the real signature: instead of one brand accent, use NDMA's actual 5-phase system as a functional sequential ramp — it's structural information, not decoration, so it does double duty as badges, chart lines, map shading, and queue borders:
-- Normal `#7A9B76` (moss) → Alert `#C9A24B` (ochre) → Alarm `#B9713A` (rust) → Emergency `#9B3B34` (brick, not neon-alarm red) → Recovery `#4A8B8C` (cool teal — deliberately a different hue family than Normal, so "recovering" reads as its own trajectory, not just "back to green")
-
-**Type** — a condensed technical grotesk for display/headings (reads like instrumentation, not editorial content); a clean humanist sans for body (Inter / IBM Plex Sans); and — this one matters functionally, not just aesthetically — a **monospace with tabular figures for every data value** (VCI3M numbers, dates). Numbers scanned down a column need to align; that's the only typeface choice that reliably does it.
-
-**Layout** — not a card grid. Priority queue is a single ranked column (the rank number is real information here, unlike decorative 01/02/03 — keep it). County detail is a two-pane split, chart-left/explanation-right (stacked on mobile). Evidence trail is a plain, dense table — deliberately *less* designed than the rest of the app, since looking like a data printout is what makes it read as evidence rather than more app chrome.
-
-**Signature element** — the threshold-crossing line. Every chart, from a tiny sparkline in the queue to the full chart on county detail, shows the forecast line visibly approaching and crossing a labeled threshold tick, with the crossing date called out directly on the line. One visual idea, repeated at every scale, referenced in the AI text and the demo video — it's the product's core insight made visible, not a motif bolted on.
-
-**Quality floor**: responsive to mobile (this will genuinely be opened on phones in the field), visible keyboard focus, and `prefers-reduced-motion` respected given how much of the motion plan below relies on animation.
+### Regional map
+- Choropleth map of Kenya's counties shaded by NDMA phase severity, so clustering that a list view hides is visible at a glance.
 
 ---
 
-## Pages
+## Tech stack
 
-**1. Priority Queue (home)** — the front door, and the actual product. Single ranked column, top to bottom by priority score. Top 1–3 entries (soonest crossing) set apart by scale or a thin rule, not shouting color — restraint reads as more trustworthy than alarm-red boxes here. Each row: county name, phase badge, a small threshold-line sparkline, days-to-crossing, one-line AI summary. Sort/filter by phase, region, livelihood zone.
+**Backend** — FastAPI, Uvicorn, pdfplumber (PDF parsing), httpx, BeautifulSoup4 (scraping), aiosqlite/SQLite, statsmodels / NumPy / SciPy / pandas (forecasting), Pydantic.
 
-**2. County Detail** — the decision-making screen. Threshold-crossing signature front and center: historical VCI3M solid, forecast continuing lighter/dashed, threshold as a labeled tick, crossing date annotated right on the line. AI explanation beside/below with small reference markers back to the exact source value (click reveals the source row inline, no navigation away). Confidence shown plainly next to the forecast, not tucked in a tooltip.
+**Frontend** — Next.js 14, React 18, TypeScript, D3 + topojson-client (map), Tailwind CSS, Framer Motion, lucide-react.
 
-**3. Evidence Trail** — the credibility screen. Dense table, monospace numerals, one row per parsed bulletin value, each linking to the specific page of the source PDF. The one place where "boring and precise" is the correct choice.
+**AI / LLM** — Groq API (Llama-family chat completions) for translation, backtest audit, and regional synthesis, with NVIDIA NIM as a fallback provider. Send Aid alert text is intentionally excluded from this — it's template-assembled, not LLM-generated.
 
-**4. Backtest / Track Record** — proof the forecast has a real history, addressing the overclaiming risk *inside the product*, not just the demo voiceover. Simple predicted-vs-confirmed timeline per county, or an aggregate hit-rate/false-alarm summary. Slightly more muted, technical styling than the rest of the app — it should look like a methods section, because that's what it is.
+**Data sources** — NDMA County Drought Early Warning Bulletins (live scrape), NDMA historical phase archive (2022–2026, hand-compiled from public bulletins), ICPAC seasonal rainfall outlook.
 
-**5. Regional Map** — surfaces clustering a list hides; the one thing the disaster-response use case specifically needs. Counties shaded by the same severity ramp, click-through to detail. A simple topoJSON Kenya-counties layer is enough — don't over-invest in a GIS stack for this.
+**Hosting** — Backend on Railway, frontend on Vercel.
 
-**6. About/Methodology** — short, always one tap away, not buried. Bakes "proof-of-concept, not a claim to reproduce the original study's exact accuracy" into the product itself. Probably the highest credibility-per-minute-of-build-time page on this list.
-
-Skip real auth/accounts — not what's being judged, pure time cost for a hackathon build.
+All sources and tools above are open-source or publicly documented commercial APIs, used within their published terms.
 
 ---
 
-## Motion design
+## Architecture
 
-Every animation should carry information, not decorate — the register is a calibrated instrument, not a consumer app.
-
-- Numbers **tween/count** rather than snap when a forecast loads — reinforces that you're watching a value move toward a threshold.
-- Threshold lines **draw left-to-right** on load instead of appearing instantly — the reveal makes the crossing feel like a finding, not chart furniture.
-- Priority queue rows **animate position** when re-sorted, so it's trackable which county moved and why, instead of the list just cutting to a new order.
-- Urgency on top entries: a slow, subtle pulse **at most** — never blinking or siren-red. Understated urgency reads as more credible than alarm UI for a tool like this.
-- Page transitions fast and minimal — a 150–200ms fade is enough. Someone using this in a meeting needs speed, not flourish.
-- For the demo video specifically: let the AI explanation visibly **type in the first time**, once — a well-worn but effective way to show the reasoning on camera. Cache it and make every later view instant; don't make real usage wait on a typing effect.
+```
+NDMA bulletin PDFs (live scrape)
+        │
+        ▼
+  Ingestion + PDF parser  ──►  SQLite (per-county VCI3M/SPI/phase records)
+        │
+        ▼
+  AR(2) forecasting engine  ──►  threshold-crossing detection  ──►  priority score
+        │
+        ▼
+  AI translation layer (Groq / NVIDIA NIM, grounded + cited)
+        │
+        ▼
+  FastAPI (/api/counties, /api/forecast, /api/evidence, /api/admin)
+        │
+        ▼
+  Next.js frontend — Priority Queue · County Detail · Evidence Trail ·
+                      Backtest · Regional Map · Send Aid
+```
 
 ---
 
-## Suggested build order
+## Running locally
 
-Ingestion + parser (de-risk this first, it's the single dependency everything else has) → forecasting engine → priority queue UI → county detail → AI translation layer → evidence trail → backtest panel → map / depth features, roughly in that order of value-per-hour.
+### Backend
 
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Create a `.env` file in `backend/` with at least:
+
+```
+GROQ_API_KEY=your_groq_key
+NVIDIA_API_KEY=your_nvidia_key   # optional fallback
+```
+
+Then run:
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+The API will be available at `http://localhost:8000`, with docs at `http://localhost:8000/docs`. Health check: `GET /health`.
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+```
+
+Create a `.env.local` file in `frontend/` if the backend isn't running on the default:
+
+```
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+Then run:
+
+```bash
+npm run dev
+```
+
+The app will be available at `http://localhost:3000`.
+
+---
+
+## API overview
+
+| Prefix | Purpose |
+|---|---|
+| `/api/counties` | County list, detail, phase data |
+| `/api/forecast` | Per-county forecasts, threshold crossings, priority queue |
+| `/api/evidence` | Source-bulletin trail for every parsed value |
+| `/api/admin` | Ingestion/scraper controls (no auth — see below) |
+
+Full interactive docs at `/docs` once the backend is running.
+
+---
+
+## Notes on scope
+
+- **No authentication.** This is a deliberate hackathon-scope decision, not an oversight — real auth wasn't what was being judged, and it's pure time cost for a build like this.
+- **Send Aid is simulated.** No live SMS gateway is wired up; the exact message text is rendered and logged instead of dispatched. See [Send Aid](#send-aid--bilingual-crisis-alert-broadcasting) above.
+- **Historical data (2022–2026)** was hand-compiled from publicly available past NDMA bulletins to fill gaps the live scraper can't reach behind NDMA's JS-driven archive filter, and never overrides a live-parsed record for the same county/month.
+
+---
+
+## Team
+
+Built for the IGAD Hackathon 2026, hosted by ICPAC (IGAD Climate Predictions and Applications Centre).
