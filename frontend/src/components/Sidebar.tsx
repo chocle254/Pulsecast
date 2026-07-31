@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ShieldAlert, Map, Database, History, Info, Activity, RefreshCw } from 'lucide-react';
+import { ShieldAlert, Map, Database, History, Radio, Activity, RefreshCw } from 'lucide-react';
 import { fetchEvidenceStats, refreshBulletins } from '@/lib/api';
 
 const navItems = [
@@ -11,7 +11,7 @@ const navItems = [
   { href: '/map', label: 'Regional Map', icon: Map },
   { href: '/evidence', label: 'Evidence Trail', icon: Database },
   { href: '/backtest', label: 'Backtest', icon: History },
-  { href: '/about', label: 'Methodology', icon: Info },
+  { href: '/aid-alerts', label: 'Send Aid', icon: Radio },
 ];
 
 function formatRelativeTime(iso: string | null): string {
