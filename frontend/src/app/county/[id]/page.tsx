@@ -8,6 +8,7 @@ import PhaseBadge from '@/components/PhaseBadge';
 import PatternBadge from '@/components/PatternBadge';
 import ThresholdChart from '@/components/ThresholdChart';
 import FormattedText from '@/components/FormattedText';
+import AidAlertPanel from '@/components/AidAlertPanel';
 import { fetchCountyDetail, fetchCountyExplanation, CountyDetail, AiExplanation } from '@/lib/api';
 
 export default function CountyDetailPage() {
@@ -145,6 +146,11 @@ export default function CountyDetailPage() {
           </div>
         </div>
       )}
+
+      {/* NGO Aid Alert Broadcast — only renders for counties currently in a
+          phase severe enough to warrant an aid-distribution SMS (see
+          AID_ALERT_ELIGIBLE_PHASES in the component). */}
+      <AidAlertPanel countyId={data.id} countyName={data.name} phase={data.current_phase} />
 
       {/* Two-Pane Main Layout: Left Chart / Right AI Translation */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
