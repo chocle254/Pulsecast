@@ -150,7 +150,7 @@ export default function CountyDetailPage() {
       {/* NGO Aid Alert Broadcast — only renders for counties currently in a
           phase severe enough to warrant an aid-distribution SMS (see
           AID_ALERT_ELIGIBLE_PHASES in the component). */}
-      <AidAlertPanel countyId={data.id} countyName={data.name} phase={data.current_phase} />
+      <AidAlertPanel countyId={data.id} countyName={data.name} phase={data.current_phase} livelihoodZone={data.livelihood_zone} />
 
       {/* Two-Pane Main Layout: Left Chart / Right AI Translation */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
